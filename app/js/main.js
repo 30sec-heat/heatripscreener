@@ -1520,16 +1520,47 @@ function drawAnnotOverlay(ctx) {
   if (annotDrawing) paint(annotDrawing.points);
 }
 
+function chartFetchHours() {
+  return loadedHours + Math.ceil((1000 * 60) / 3600);
+}
+
+async function fetchChartPayload() {
+  const pv = ind.split ? '1' : '0';
+  const res = await fetch(
+    `/api/chart?symbol=${encodeURIComponent(sym)}&tf=60&hours=${chartFetchHours()}&perVenueOi=${pv}`,
+  );
+  if (!res.ok) throw new Error(String(res.status));
+  return res.json();
+}
+
+/** Re-pull Velo bars + OI while staying on the same symbol (WS only updates price; OI/net L−S go stale without this). */
+async function refreshChartSilent() {
+  if (document.visibilityState !== 'visible') return;
+  try {
+    const data = await fetchChartPayload();
+    bars1m = data.bars || [];
+    oiRaw = data.oiByEx || {};
+    if (bars1m.length > 0) lastP = bars1m[bars1m.length - 1].c;
+    invalidateOICaches();
+    updSB();
+    scheduleRedraw();
+  } catch (e) {
+    console.warn('chart refresh', e);
+  }
+}
+
+function ensureLiveWs() {
+  if (document.visibilityState !== 'visible') return;
+  if (!ws || ws.readyState === WebSocket.CLOSED) connectWS();
+}
+
 async function loadChart() {
   chartHistoryLoaded = false;
   scheduleRedraw();
   $st.textContent = 'Loading…';
   $st.className = 'status-pill';
   try {
-    const extraH = Math.ceil((1000 * 60) / 3600);
-    const pv = ind.split ? '1' : '0';
-    const res = await fetch(`/api/chart?symbol=${sym}&tf=60&hours=${loadedHours + extraH}&perVenueOi=${pv}`);
-    const data = await res.json();
+    const data = await fetchChartPayload();
     bars1m = data.bars || [];
     oiRaw = data.oiByEx || {};
     if (bars1m.length > 0) lastP = bars1m[bars1m.length - 1].c;
@@ -1551,10 +1582,7 @@ async function loadMore() {
   $st.textContent = 'Loading…';
   $st.className = 'status-pill';
   try {
-    const extraH = Math.ceil((1000 * 60) / 3600);
-    const pv = ind.split ? '1' : '0';
-    const res = await fetch(`/api/chart?symbol=${sym}&tf=60&hours=${loadedHours + extraH}&perVenueOi=${pv}`);
-    const data = await res.json();
+    const data = await fetchChartPayload();
     const newBars = data.bars || [];
     if (newBars.length > 0) {
       const oldStart = bars1m.length ? bars1m[0].t : Infinity;
@@ -1741,4 +1769,16 @@ $chartCopy.addEventListener('click', async () => {
   updSB();
   scheduleRedraw();
   setInterval(fetchT, 60_000);
+  setInterval(refreshChartSilent, 180_000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    refreshChartSilent();
+    ensureLiveWs();
+  });
+  window.addEventListener('pageshow', (e) => {
+    if (e.persisted) {
+      refreshChartSilent();
+      ensureLiveWs();
+    }
+  });
 })();
