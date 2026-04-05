@@ -48,15 +48,21 @@
       <button type="button" class="seg-btn on" data-ex="deribit">Drb</button>
       <button type="button" class="seg-btn on" data-ex="hyperliquid">HL</button>
     </div>
-    <span class="field-label">Theme</span>
-    <button type="button" class="seg-btn" id="theme-toggle" aria-pressed="false" title="Use light theme">Light</button>
     <span class="field-label">Ink</span>
     <div class="segmented shrink-0" role="group" aria-label="Annotations">
       <button type="button" class="seg-btn" id="annot-toggle" aria-pressed="false" title="Freehand ink on chart (incl. indicators). Toggle off to resize panels.">Draw</button>
       <button type="button" class="seg-btn ico" id="annot-clear" aria-label="Clear circles" title="Clear circles">×</button>
     </div>
     <div class="spacer"></div>
-    <div id="st" class="status-pill">…</div>
+    <div class="toolbar-end" role="group" aria-label="Chart view">
+      <button type="button" id="chart-copy" class="toolbar-ico-btn" aria-label="Copy chart as PNG" title="Copy chart as PNG to clipboard">
+        <svg class="h-[1.1rem] w-[1.1rem] sm:h-5 sm:w-5" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      </button>
+      <button type="button" id="theme-toggle" class="toolbar-ico-btn" aria-pressed="false" title="Use light theme" aria-label="Use light theme">
+        <svg class="theme-ico-sun h-[1.1rem] w-[1.1rem] sm:h-5 sm:w-5" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+        <svg class="theme-ico-moon hidden h-[1.1rem] w-[1.1rem] sm:h-5 sm:w-5" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+      </button>
+    </div>
   </nav>
 </header>
 
@@ -64,9 +70,6 @@
   <div class="chart-card">
     <div id="cw">
       <canvas id="cv" title="Drag: scroll history. At the live edge, drag left (see newer) to pull in empty space past the last candle. Alt+drag: fine nudge. Double-click: reset."></canvas>
-      <button type="button" id="chart-copy" class="chart-copy-btn" aria-label="Copy chart as PNG" title="Copy chart as PNG to clipboard">
-        <svg class="h-[1.1rem] w-[1.1rem] sm:h-5 sm:w-5" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-      </button>
       <div id="sbw"><div id="sbt"></div></div>
     </div>
   </div>

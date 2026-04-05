@@ -78,9 +78,16 @@ function syncThemeToggleLabel() {
   const btn = $('theme-toggle');
   if (!btn) return;
   const light = document.documentElement.dataset.theme === 'light';
-  btn.textContent = light ? 'Dark' : 'Light';
   btn.setAttribute('aria-pressed', light ? 'true' : 'false');
-  btn.title = light ? 'Use dark theme' : 'Use light theme';
+  const t = light ? 'Use dark theme' : 'Use light theme';
+  btn.title = t;
+  btn.setAttribute('aria-label', t);
+  const sun = btn.querySelector('.theme-ico-sun');
+  const moon = btn.querySelector('.theme-ico-moon');
+  if (sun && moon) {
+    sun.classList.toggle('hidden', light);
+    moon.classList.toggle('hidden', !light);
+  }
 }
 
 function initTheme() {
@@ -722,8 +729,7 @@ function setTf(sec) {
 }
 
 const $ = (id) => document.getElementById(id);
-const $st = $('st'),
-  $pl = $('pl'),
+const $pl = $('pl'),
   $tl = $('tl'),
   $si = $('si'),
   $sbt = $('sbt'),
@@ -738,8 +744,6 @@ let ws = null;
 function connectWS() {
   ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`);
   ws.onopen = () => {
-    $st.textContent = 'live';
-    $st.className = 'status-pill live';
     ws.send(JSON.stringify({ subscribe: [sym], timeframes: [60] }));
   };
   ws.onmessage = (e) => {
@@ -791,8 +795,6 @@ function connectWS() {
     }
   };
   ws.onclose = () => {
-    $st.textContent = '…';
-    $st.className = 'status-pill';
     setTimeout(connectWS, 2000);
   };
   ws.onerror = () => ws.close();
@@ -2106,20 +2108,14 @@ function ensureLiveWs() {
 async function loadChart() {
   chartHistoryLoaded = false;
   scheduleRedraw();
-  $st.textContent = 'Loading…';
-  $st.className = 'status-pill';
   try {
     const data = await fetchChartPayload();
     bars1m = data.bars || [];
     oiRaw = data.oiByEx || {};
     if (bars1m.length > 0) lastP = bars1m[bars1m.length - 1].c;
-    $st.textContent = bars1m.length + ' bars';
-    $st.className = 'status-pill live';
     invalidateOICaches();
   } catch (e) {
     console.error(e);
-    $st.textContent = 'error';
-    $st.className = 'status-pill status-err';
   } finally {
     chartHistoryLoaded = true;
   }
@@ -2128,8 +2124,6 @@ async function loadChart() {
 }
 
 async function loadMore() {
-  $st.textContent = 'Loading…';
-  $st.className = 'status-pill';
   try {
     const data = await fetchChartPayload();
     const newBars = data.bars || [];
@@ -2147,12 +2141,9 @@ async function loadMore() {
       vis = Math.min(total, targetVis);
       syncVisLabel();
     }
-    $st.textContent = bars1m.length + ' bars';
-    $st.className = 'status-pill live';
     invalidateOICaches();
   } catch (e) {
-    $st.textContent = 'error';
-    $st.className = 'status-pill status-err';
+    console.error(e);
   }
   updSB();
   scheduleRedraw();
@@ -2369,8 +2360,9 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
+const CHART_COPY_TITLE = 'Copy chart as PNG to clipboard';
 const $chartCopy = $('chart-copy');
-$chartCopy.addEventListener('click', async () => {
+$chartCopy?.addEventListener('click', async () => {
   let blob;
   try {
     blob = await new Promise((resolve, reject) => {
@@ -2378,8 +2370,10 @@ $chartCopy.addEventListener('click', async () => {
     });
   } catch (e) {
     console.error(e);
-    $st.textContent = 'png error';
-    $st.className = 'status-pill status-err';
+    $chartCopy.title = 'Could not create PNG';
+    setTimeout(() => {
+      $chartCopy.title = CHART_COPY_TITLE;
+    }, 2200);
     return;
   }
   const png =
@@ -2387,31 +2381,24 @@ $chartCopy.addEventListener('click', async () => {
       ? blob
       : new Blob([await blob.arrayBuffer()], { type: 'image/png' });
 
-  const prev = $st.textContent;
-  const prevC = $st.className;
   try {
     if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
       throw new Error('clipboard unsupported');
     }
-    // Lazy Promise form is required for image/png in Chromium / WebKit.
     await navigator.clipboard.write([
       new ClipboardItem({
         'image/png': Promise.resolve(png),
       }),
     ]);
-    $st.textContent = 'copied PNG';
-    $st.className = 'status-pill live';
+    $chartCopy.title = 'Copied PNG';
     setTimeout(() => {
-      $st.textContent = prev;
-      $st.className = prevC;
+      $chartCopy.title = CHART_COPY_TITLE;
     }, 1600);
   } catch (e) {
     console.warn('clipboard:', e);
-    $st.textContent = 'clipboard blocked';
-    $st.className = 'status-pill status-err';
+    $chartCopy.title = 'Clipboard blocked';
     setTimeout(() => {
-      $st.textContent = prev;
-      $st.className = prevC;
+      $chartCopy.title = CHART_COPY_TITLE;
     }, 2200);
   }
 });

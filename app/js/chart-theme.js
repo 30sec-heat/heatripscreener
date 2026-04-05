@@ -1,4 +1,4 @@
-/** Chart colors — Binance-inspired (surfaces + #F0B90B accent, #0ECB81 / #F6465D candles). */
+/** Chart colors — dark: Binance-style green/red OHLC; light: B&W candles + accent. */
 
 const chartThemeDark = {
   bg: '#1e2329',
@@ -63,12 +63,13 @@ const chartThemeLight = {
   grid: 'rgba(30, 35, 41, 0.06)',
   gridMinor: 'rgba(30, 35, 41, 0.035)',
   gridText: '#707a8a',
-  wickBull: '#0aaf72',
-  wickBear: '#e85063',
-  bull: '#0ecb81',
-  bear: '#f6465d',
-  bearBorder: '#e04b5f',
-  bodyLine: '#0aa86a',
+  /** Classic B&W candles: hollow white up (outline + wick black), solid black down. */
+  wickBull: '#000000',
+  wickBear: '#000000',
+  bull: '#ffffff',
+  bear: '#000000',
+  bearBorder: '#000000',
+  bodyLine: '#000000',
   priceLine: 'rgba(201, 148, 0, 0.42)',
   priceTagBg: '#f0b90b',
   priceTagText: '#0b0e11',

@@ -148,20 +148,16 @@
     @apply hidden min-w-px sm:block sm:flex-1;
   }
 
-  .status-pill {
-    @apply w-full rounded-shell border border-border bg-surface px-2.5 py-2 text-center font-mono text-sm text-muted sm:w-auto sm:px-3 sm:py-1.5 sm:text-left;
+  .toolbar-end {
+    @apply flex w-full shrink-0 items-center justify-end gap-1 sm:w-auto sm:gap-1.5;
   }
 
-  .status-pill.live {
-    color: var(--green);
-    border-color: color-mix(in srgb, var(--green) 40%, transparent);
-    background: color-mix(in srgb, var(--green) 8%, transparent);
+  .toolbar-ico-btn {
+    @apply flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-shell border border-border-light bg-[color-mix(in_srgb,var(--bg-panel)_94%,transparent)] p-0 text-muted transition-colors active:scale-[0.96] sm:h-11 sm:w-11;
   }
 
-  .status-pill.status-err {
-    color: var(--red);
-    border-color: color-mix(in srgb, var(--red) 45%, transparent);
-    background: color-mix(in srgb, var(--red) 8%, transparent);
+  .toolbar-ico-btn:hover {
+    @apply border-[color-mix(in_srgb,var(--accent)_38%,var(--border-light))] bg-hover text-accent;
   }
 
   #main {
@@ -176,20 +172,12 @@
     @apply relative min-h-0 flex-1 bg-panel;
   }
 
-  .chart-copy-btn {
-    @apply absolute right-2.5 top-2 z-[6] flex h-10 w-10 items-center justify-center rounded-shell border border-border-light bg-[color-mix(in_srgb,var(--bg-panel)_94%,transparent)] p-0 text-muted transition-colors active:scale-[0.96] sm:right-3 sm:top-2.5 sm:h-11 sm:w-11;
-  }
-
-  .chart-copy-btn:hover {
-    @apply border-[color-mix(in_srgb,var(--accent)_38%,var(--border-light))] bg-hover text-accent;
-  }
-
   canvas {
     @apply block h-full w-full;
   }
 
   #sbw {
-    @apply absolute bottom-0 left-10 right-[4.5rem] z-[3] h-2.5 border-t border-border sm:left-12 sm:right-[5.25rem];
+    @apply absolute bottom-0 left-10 right-10 z-[3] h-2.5 border-t border-border sm:left-12 sm:right-12;
     background: linear-gradient(to top, var(--sb-fade), transparent);
   }
 
