@@ -59,19 +59,19 @@
   }
 
   .ftx-brand {
-    @apply mb-2 flex w-full shrink-0 items-center gap-2 border-b border-border pb-2 sm:mb-0 sm:w-auto sm:gap-2.5 sm:border-b-0 sm:border-r sm:pb-0 sm:pr-3.5 sm:mr-1 md:pr-4;
+    @apply mb-2 flex w-full shrink-0 items-center gap-2 border-b border-border pb-2 sm:mb-0 sm:w-auto sm:gap-3 sm:border-b-0 sm:border-r sm:pb-0 sm:pr-3.5 sm:mr-1 md:pr-4;
   }
 
-  .ftx-mark {
-    @apply h-[1.35rem] w-[3px] shrink-0 rounded-[1px] bg-accent shadow-accentglow;
+  .brand-link {
+    @apply flex shrink-0 items-center outline-none ring-accent focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-panel;
   }
 
-  .ftx-logo {
-    @apply text-lg font-bold tracking-tight text-ink sm:text-xl;
+  .brand-logo {
+    @apply h-8 w-auto sm:h-9;
   }
 
-  .ftx-tag {
-    @apply text-xs font-semibold uppercase tracking-wider text-faint sm:text-sm;
+  html[data-theme='dark'] .brand-logo {
+    filter: invert(1);
   }
 
   .pair {

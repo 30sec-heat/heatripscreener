@@ -729,6 +729,7 @@ function setTf(sec) {
 }
 
 const $ = (id) => document.getElementById(id);
+const DOC_TITLE_PAIR = (pair) => `${pair} · heat.rip`;
 const $pl = $('pl'),
   $tl = $('tl'),
   $si = $('si'),
@@ -2166,7 +2167,7 @@ async function switchSym(s) {
   invalidateOICaches();
   sym = s;
   $pl.textContent = s.replace('USDT', '/USDT');
-  document.title = 'heat.rip — ' + s.replace('USDT', '/USDT');
+  document.title = DOC_TITLE_PAIR($pl.textContent);
   hlT(s);
   resub();
   await loadChart();
@@ -2280,7 +2281,7 @@ function syncToolbarFromState() {
   if (si) si.value = tF;
   if ($pl) {
     $pl.textContent = sym.replace('USDT', '/USDT');
-    document.title = 'heat.rip — ' + sym.replace('USDT', '/USDT');
+    document.title = DOC_TITLE_PAIR($pl.textContent);
   }
   syncVisLabel();
 }
