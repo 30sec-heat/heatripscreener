@@ -1681,18 +1681,6 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
-function downloadChartPngBlob(blob) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `heatrip-${sym}-${Date.now()}.png`;
-  a.rel = 'noopener';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 2500);
-}
-
 const $chartCopy = $('chart-copy');
 $chartCopy.addEventListener('click', async () => {
   let blob;
@@ -1706,25 +1694,33 @@ $chartCopy.addEventListener('click', async () => {
     $st.className = 'status-pill status-err';
     return;
   }
+  const png =
+    blob.type === 'image/png'
+      ? blob
+      : new Blob([await blob.arrayBuffer()], { type: 'image/png' });
+
   const prev = $st.textContent;
   const prevC = $st.className;
   try {
-    if (navigator.clipboard?.write && typeof ClipboardItem !== 'undefined') {
-      await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
-      $st.textContent = 'copied PNG';
-      $st.className = 'status-pill live';
-      setTimeout(() => {
-        $st.textContent = prev;
-        $st.className = prevC;
-      }, 1600);
-      return;
+    if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
+      throw new Error('clipboard unsupported');
     }
-    throw new Error('clipboard unsupported');
+    // Lazy Promise form is required for image/png in Chromium / WebKit.
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        'image/png': Promise.resolve(png),
+      }),
+    ]);
+    $st.textContent = 'copied PNG';
+    $st.className = 'status-pill live';
+    setTimeout(() => {
+      $st.textContent = prev;
+      $st.className = prevC;
+    }, 1600);
   } catch (e) {
     console.warn('clipboard:', e);
-    downloadChartPngBlob(blob);
-    $st.textContent = 'saved PNG (open Downloads if clipboard blocked)';
-    $st.className = 'status-pill live';
+    $st.textContent = 'clipboard blocked';
+    $st.className = 'status-pill status-err';
     setTimeout(() => {
       $st.textContent = prev;
       $st.className = prevC;
