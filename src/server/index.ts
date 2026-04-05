@@ -2,7 +2,7 @@ import http from 'http';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { SERVER_PORT, SYMBOLS, TIMEFRAMES } from '../shared/config.js';
+import { SERVER_PORT, SYMBOLS, TICKER_FALLBACK, TIMEFRAMES } from '../shared/config.js';
 import { setupWebSocket } from './ws-handler.js';
 import { startOIPoller, isBanned, checkBanResponse } from '../ingestion/oi-poller.js';
 import { startVeloLivePoller } from '../ingestion/velo-live-bars.js';
@@ -141,19 +141,61 @@ const server = http.createServer(async (req, res) => {
   catch { res.writeHead(404); res.end('Not Found'); }
 });
 
-let tickerCache: any[] = [];
+const BINANCE_UA = { 'User-Agent': 'heat.rip-tickers/1 (+https://heat.rip)' };
+
+function syntheticTickers(): any[] {
+  return TICKER_FALLBACK.map((symbol) => ({
+    symbol,
+    lastPrice: '0',
+    priceChangePercent: '0',
+    quoteVolume: '0',
+  }));
+}
+
+function sortUsdtByVol(rows: any[]): any[] {
+  return rows
+    .filter((t: any) => t?.symbol?.endsWith?.('USDT'))
+    .sort((a: any, b: any) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume));
+}
+
+let tickerCache: any[] = syntheticTickers();
+
 async function refreshTickers() {
   if (!isBanned()) {
+    let loaded = false;
     try {
-      const r = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr');
+      const r = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr', { headers: BINANCE_UA });
       const d = await r.json();
-      if (Array.isArray(d)) tickerCache = d.filter((t: any) => t.symbol.endsWith('USDT')).sort((a: any, b: any) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume));
-      else checkBanResponse(d);
-    } catch {}
+      if (Array.isArray(d) && d.length > 0) {
+        const sorted = sortUsdtByVol(d);
+        if (sorted.length > 0) {
+          tickerCache = sorted;
+          loaded = true;
+        }
+      } else checkBanResponse(d);
+    } catch { /* spot fallback */ }
+
+    if (!loaded) {
+      try {
+        const r2 = await fetch('https://api.binance.com/api/v3/ticker/24hr', { headers: BINANCE_UA });
+        const d2 = await r2.json();
+        if (Array.isArray(d2) && d2.length > 0) {
+          const sorted = sortUsdtByVol(d2);
+          if (sorted.length > 0) {
+            tickerCache = sorted;
+            loaded = true;
+          }
+        }
+      } catch { /* keep prior cache */ }
+    }
   }
+
+  if (tickerCache.length === 0) tickerCache = syntheticTickers();
+
   setTimeout(refreshTickers, 60000);
 }
-setTimeout(refreshTickers, 3000);
+
+void refreshTickers();
 
 setupWebSocket(server);
 startVeloLivePoller();
