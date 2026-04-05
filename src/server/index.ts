@@ -6,7 +6,13 @@ import { SERVER_PORT, SYMBOLS, TIMEFRAMES } from '../shared/config.js';
 import { setupWebSocket } from './ws-handler.js';
 import { startOIPoller, isBanned, checkBanResponse } from '../ingestion/oi-poller.js';
 import { startVeloLivePoller } from '../ingestion/velo-live-bars.js';
-import { fetchVeloRaw, ALL_EXCHANGES } from '../shared/velo.js';
+import {
+  fetchVeloRaw,
+  ALL_EXCHANGES,
+  buildAggregatedOISymbol,
+  buildPerVenueOISymbol,
+  sleep,
+} from '../shared/velo.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_DIR = path.resolve(__dirname, '../../app');
@@ -24,32 +30,43 @@ async function fetchVelo(symbol: string, res: number, begin: number, end: number
   return fetchVeloRaw(symbol, res, begin, end);
 }
 
-async function buildChartPayload(symbol: string, hours: number) {
-  const now = Date.now();
+function pushOiRows(dst: { t: number; o: number; h: number; l: number; c: number }[], rows: number[][]) {
+  for (const r of rows) dst.push({ t: r[0], o: r[1], h: r[2], l: r[3], c: r[4] });
+}
+
+async function buildChartPayloadOnce(
+  symbol: string,
+  hours: number,
+  perVenueOi: boolean,
+  now: number,
+) {
   const begin = now - hours * 3600000;
-
-  /** 1× OHLC (binance-futures per velo.ts) + 1× USD OI candles per venue — parallel. */
-  const [priceArr, ...oiParts] = await Promise.all([
-    fetchVelo(symbol, PRICE_RES, begin, now),
-    ...ALL_EXCHANGES.map(async (ex) => {
-      const oiSym = `${symbol}#${ex}#open_interest#aggregated#USD#Candles`;
-      try {
-        const rows = await fetchVelo(oiSym, OI_RES, begin, now);
-        return { ex, rows } as const;
-      } catch {
-        return { ex, rows: [] as number[][] } as const;
-      }
-    }),
-  ]);
-
-  const priceBars = [...priceArr].sort((a, b) => a[0] - b[0]);
 
   const oiByEx: Record<string, { t: number; o: number; h: number; l: number; c: number }[]> = {};
   for (const ex of ALL_EXCHANGES) oiByEx[ex] = [];
 
-  for (const { ex, rows } of oiParts) {
-    for (const r of rows)
-      oiByEx[ex].push({ t: r[0], o: r[1], h: r[2], l: r[3], c: r[4] });
+  const priceP = fetchVelo(symbol, PRICE_RES, begin, now);
+  const oiP = perVenueOi
+    ? Promise.all(
+        ALL_EXCHANGES.map(async (ex) => {
+          try {
+            const rows = await fetchVelo(buildPerVenueOISymbol(symbol, ex), OI_RES, begin, now);
+            return { ex, rows } as const;
+          } catch {
+            return { ex, rows: [] as number[][] } as const;
+          }
+        }),
+      )
+    : fetchVelo(buildAggregatedOISymbol(symbol), OI_RES, begin, now).catch(() => [] as number[][]);
+
+  const [priceArr, oiOut] = await Promise.all([priceP, oiP]);
+
+  const priceBars = [...priceArr].sort((a, b) => a[0] - b[0]);
+
+  if (perVenueOi) {
+    for (const { ex, rows } of oiOut as { ex: string; rows: number[][] }[]) pushOiRows(oiByEx[ex], rows);
+  } else {
+    pushOiRows(oiByEx[ALL_EXCHANGES[0]], oiOut as number[][]);
   }
 
   const bars = priceBars.map((r: number[]) => ({
@@ -64,6 +81,23 @@ async function buildChartPayload(symbol: string, hours: number) {
   return { bars, oiByEx };
 }
 
+/** Velo often times out or returns [] for long ranges from cloud IPs — retry with shorter windows. */
+async function buildChartPayload(symbol: string, hours: number, perVenueOi: boolean) {
+  const now = Date.now();
+  const tiers = [hours, Math.min(hours, 8), Math.min(hours, 4), 2, 1];
+  const tried = new Set<number>();
+  let last: Awaited<ReturnType<typeof buildChartPayloadOnce>> | undefined;
+  for (const h of tiers) {
+    const hn = Math.max(1, Math.min(72, h));
+    if (tried.has(hn)) continue;
+    tried.add(hn);
+    last = await buildChartPayloadOnce(symbol, hn, perVenueOi, now);
+    if (last.bars.length > 0) return last;
+    await sleep(250);
+  }
+  return last ?? buildChartPayloadOnce(symbol, 1, perVenueOi, now);
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://localhost:${SERVER_PORT}`);
 
@@ -71,10 +105,14 @@ const server = http.createServer(async (req, res) => {
   // Frontend computes net L/S, aggregated OI, and split views locally
   if (url.pathname === '/api/chart') {
     const symbol = url.searchParams.get('symbol') ?? 'BTCUSDT';
-    const hours = Math.min(parseFloat(url.searchParams.get('hours') ?? '34'), 72);
+    const hours = Math.min(
+      Math.max(1, parseFloat(url.searchParams.get('hours') ?? '34') || 34),
+      72,
+    );
+    const perVenueOi = url.searchParams.get('perVenueOi') === '1';
 
     try {
-      const { bars, oiByEx } = await buildChartPayload(symbol, hours);
+      const { bars, oiByEx } = await buildChartPayload(symbol, hours, perVenueOi);
 
       res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
       res.end(JSON.stringify({ bars, oiByEx }));

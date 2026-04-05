@@ -234,7 +234,8 @@ document.querySelectorAll('input[data-ind]').forEach((inp) => {
       document.querySelector('[data-ex="deribit"]')?.classList.remove('on');
     }
     invalidateOISlice();
-    scheduleRedraw();
+    if (kk === 'split') loadChart();
+    else scheduleRedraw();
   });
 });
 document.querySelectorAll('[data-ex]').forEach((b) => {
@@ -247,6 +248,9 @@ document.querySelectorAll('[data-ex]').forEach((b) => {
     scheduleRedraw();
   });
 });
+
+/** False until /api/chart finishes (empty response still counts). Used so canvas is not stuck on “Loading…” forever. */
+let chartHistoryLoaded = false;
 
 let sym = 'BTCUSDT';
 let tf = 60;
@@ -282,6 +286,7 @@ let prevShowXH = false;
 let panelDividerY = 0;
 
 function ext1mSeries() {
+  if (!chartHistoryLoaded) return bars1m;
   return curBar ? bars1m.concat([curBar]) : bars1m;
 }
 
@@ -329,6 +334,13 @@ function connectWS() {
   };
   ws.onmessage = (e) => {
     const m = JSON.parse(e.data);
+    if (
+      !chartHistoryLoaded &&
+      m.symbol === sym &&
+      (m.type === 'bar_update' || m.type === 'bar')
+    ) {
+      return;
+    }
     if (m.type === 'trade' && m.symbol === sym) {
       lastP = m.price;
       scheduleLiveRedraw();
@@ -840,7 +852,12 @@ function draw() {
     ctx.fillStyle = chartTheme.loading;
     ctx.font = "500 12px 'DM Sans', system-ui, sans-serif";
     ctx.textAlign = 'center';
-    ctx.fillText('Loading…', W / 2, H / 2);
+    const wsOpen = ws && ws.readyState === 1;
+    let msg;
+    if (!chartHistoryLoaded) msg = 'Loading history…';
+    else if (!wsOpen) msg = 'Connecting WebSocket…';
+    else msg = 'No history from API — waiting for live bars';
+    ctx.fillText(msg, W / 2, H / 2);
     return;
   }
 
@@ -889,6 +906,8 @@ function draw() {
   const oiFull1m = getOIFull1m(ext1m);
   const oiData = tf <= 60 ? getOI(shown) : getOIDisplayTf(shown, ext1m);
   const xRight = W - pR - CHART_PAD_R;
+  /** Clip width for stacked indicators: includes right gutter so drawLine hi/lo labels survive clipping. */
+  const indClipW = W - pL - 2;
 
   let hi = -Infinity;
   let lo = Infinity;
@@ -967,6 +986,11 @@ function draw() {
       }
     }
   }
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(pL, pT, xRight - pL, ohlcH);
+  ctx.clip();
 
   ctx.lineCap = 'round';
   for (let i = 0; i < shown.length; i++) {
@@ -1169,6 +1193,8 @@ function draw() {
       }
     } catch (_e) {}
 
+  ctx.restore();
+
   if (lastP != null && lastP >= lo && lastP <= hi) {
     const y = toY(lastP);
     ctx.strokeStyle = chartTheme.priceLine;
@@ -1216,6 +1242,11 @@ function draw() {
       ctx.textAlign = 'left';
       ctx.fillText(s === 'netlongs' ? 'NET LONGS' : 'NET SHORTS', pL + 3, py + 7);
 
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(pL, dT, indClipW, pH);
+      ctx.clip();
+
       if (ind.split) {
         const series = [];
         for (const ex of oiFull1m.activeEx) {
@@ -1254,6 +1285,7 @@ function draw() {
         const vals = downsampleCumToTf(cum1m, ext1m, shown, tf);
         drawLine(ctx, vals, dT, pH, pL, xRight, toX, col, fill, 0.8);
       }
+      ctx.restore();
     }
 
     if (s === 'oi') {
@@ -1276,6 +1308,10 @@ function draw() {
       }
       if (gBounds)
         oiPanelHud = { dT, pH, base: 0, hi: gBounds.hi, lo: gBounds.lo, agg: oiData.agg };
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(pL, dT, indClipW, pH);
+      ctx.clip();
       if (ind.split) {
         const series = [];
         for (const ex of oiData.activeEx) {
@@ -1338,6 +1374,7 @@ function draw() {
           false
         );
       }
+      ctx.restore();
     }
 
     if (s === 'osc' && oscFull) {
@@ -1352,7 +1389,12 @@ function draw() {
         oscVals.push(oscFull[gi]);
         p95Vals.push(oscCache.p95[gi]);
       }
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(pL, dT, indClipW, pH);
+      ctx.clip();
       drawOscPanel(ctx, oscVals, p95Vals, dT, pH, pL, xRight, toX);
+      ctx.restore();
     }
 
     py += rowH + gap;
@@ -1479,11 +1521,14 @@ function drawAnnotOverlay(ctx) {
 }
 
 async function loadChart() {
+  chartHistoryLoaded = false;
+  scheduleRedraw();
   $st.textContent = 'Loading…';
   $st.className = 'status-pill';
   try {
     const extraH = Math.ceil((1000 * 60) / 3600);
-    const res = await fetch(`/api/chart?symbol=${sym}&tf=60&hours=${loadedHours + extraH}`);
+    const pv = ind.split ? '1' : '0';
+    const res = await fetch(`/api/chart?symbol=${sym}&tf=60&hours=${loadedHours + extraH}&perVenueOi=${pv}`);
     const data = await res.json();
     bars1m = data.bars || [];
     oiRaw = data.oiByEx || {};
@@ -1495,6 +1540,8 @@ async function loadChart() {
     console.error(e);
     $st.textContent = 'error';
     $st.className = 'status-pill status-err';
+  } finally {
+    chartHistoryLoaded = true;
   }
   updSB();
   scheduleRedraw();
@@ -1505,7 +1552,8 @@ async function loadMore() {
   $st.className = 'status-pill';
   try {
     const extraH = Math.ceil((1000 * 60) / 3600);
-    const res = await fetch(`/api/chart?symbol=${sym}&tf=60&hours=${loadedHours + extraH}`);
+    const pv = ind.split ? '1' : '0';
+    const res = await fetch(`/api/chart?symbol=${sym}&tf=60&hours=${loadedHours + extraH}&perVenueOi=${pv}`);
     const data = await res.json();
     const newBars = data.bars || [];
     if (newBars.length > 0) {
@@ -1551,8 +1599,8 @@ async function switchSym(s) {
   $pl.textContent = s.replace('USDT', '/USDT');
   document.title = 'heat.rip — ' + s.replace('USDT', '/USDT');
   hlT(s);
-  await loadChart();
   resub();
+  await loadChart();
   updSB();
 }
 
@@ -1688,9 +1736,9 @@ $chartCopy.addEventListener('click', async () => {
     if (!b) return;
     setTf(Number(b.dataset.tf));
   });
+  connectWS();
   await fetchT();
   await loadChart();
-  connectWS();
   updSB();
   scheduleRedraw();
   setInterval(fetchT, 60000);

@@ -8,7 +8,7 @@
   "scripts": {
     "build:css": "tailwindcss -i ./app/css/input.css -o ./app/styles.css",
     "build:css:min": "tailwindcss -i ./app/css/input.css -o ./app/styles.css --minify",
-    "start": "tsx src/server/index.ts",
+    "start": "NODE_OPTIONS='--dns-result-order=ipv4first' tsx src/server/index.ts",
     "ingest": "tsx src/ingestion/index.ts",
     "server": "tsx src/server/index.ts"
   },
