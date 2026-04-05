@@ -98,6 +98,89 @@ async function buildChartPayload(symbol: string, hours: number, perVenueOi: bool
   return last ?? buildChartPayloadOnce(symbol, 1, perVenueOi, now);
 }
 
+const TICKERS_SNAPSHOT = path.join(APP_DIR, 'tickers.json');
+const BINANCE_UA = { 'User-Agent': 'heat.rip-tickers/1 (+https://heat.rip)' };
+
+function syntheticTickers(): any[] {
+  return TICKER_FALLBACK.map((symbol) => ({
+    symbol,
+    lastPrice: '0',
+    priceChangePercent: '0',
+    quoteVolume: '0',
+  }));
+}
+
+function sortUsdtByVol(rows: any[]): any[] {
+  return rows
+    .filter((t: any) => t?.symbol?.endsWith?.('USDT'))
+    .sort((a: any, b: any) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume));
+}
+
+function slimTickerRow(t: any) {
+  return {
+    symbol: t.symbol,
+    lastPrice: String(t.lastPrice ?? 0),
+    priceChangePercent: String(t.priceChangePercent ?? 0),
+    quoteVolume: String(t.quoteVolume ?? 0),
+  };
+}
+
+function readTickerSnapshot(): any[] {
+  try {
+    const raw = fs.readFileSync(TICKERS_SNAPSHOT, 'utf8');
+    const d = JSON.parse(raw);
+    if (Array.isArray(d) && d.length > 0) return d;
+  } catch {
+    /* missing or corrupt */
+  }
+  return syntheticTickers();
+}
+
+let tickerCache: any[] = readTickerSnapshot();
+
+async function refreshTickers() {
+  if (!isBanned()) {
+    let loaded = false;
+    try {
+      const r = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr', { headers: BINANCE_UA });
+      const d = await r.json();
+      if (Array.isArray(d) && d.length > 0) {
+        const sorted = sortUsdtByVol(d);
+        if (sorted.length > 0) {
+          tickerCache = sorted.map(slimTickerRow);
+          loaded = true;
+        }
+      } else checkBanResponse(d);
+    } catch { /* spot */ }
+
+    if (!loaded) {
+      try {
+        const r2 = await fetch('https://api.binance.com/api/v3/ticker/24hr', { headers: BINANCE_UA });
+        const d2 = await r2.json();
+        if (Array.isArray(d2) && d2.length > 0) {
+          const sorted = sortUsdtByVol(d2);
+          if (sorted.length > 0) {
+            tickerCache = sorted.map(slimTickerRow);
+            loaded = true;
+          }
+        }
+      } catch { /* keep snapshot */ }
+    }
+
+    if (loaded) {
+      try {
+        fs.writeFileSync(TICKERS_SNAPSHOT, JSON.stringify(tickerCache));
+      } catch {
+        /* read-only fs */
+      }
+    }
+  }
+
+  if (tickerCache.length === 0) tickerCache = syntheticTickers();
+
+  setTimeout(refreshTickers, 60_000);
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://localhost:${SERVER_PORT}`);
 
@@ -130,9 +213,14 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
     res.end(JSON.stringify(SYMBOLS)); return;
   }
-  if (url.pathname === '/api/tickers') {
-    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-    res.end(JSON.stringify(tickerCache)); return;
+  if (url.pathname === '/api/tickers' || url.pathname === '/tickers.json') {
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'public, max-age=15',
+    });
+    res.end(JSON.stringify(tickerCache));
+    return;
   }
 
   let filePath = path.join(APP_DIR, url.pathname === '/' ? 'index.html' : url.pathname);
@@ -140,60 +228,6 @@ const server = http.createServer(async (req, res) => {
   try { const data = fs.readFileSync(filePath); res.writeHead(200, { 'Content-Type': MIME[ext] ?? 'application/octet-stream' }); res.end(data); }
   catch { res.writeHead(404); res.end('Not Found'); }
 });
-
-const BINANCE_UA = { 'User-Agent': 'heat.rip-tickers/1 (+https://heat.rip)' };
-
-function syntheticTickers(): any[] {
-  return TICKER_FALLBACK.map((symbol) => ({
-    symbol,
-    lastPrice: '0',
-    priceChangePercent: '0',
-    quoteVolume: '0',
-  }));
-}
-
-function sortUsdtByVol(rows: any[]): any[] {
-  return rows
-    .filter((t: any) => t?.symbol?.endsWith?.('USDT'))
-    .sort((a: any, b: any) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume));
-}
-
-let tickerCache: any[] = syntheticTickers();
-
-async function refreshTickers() {
-  if (!isBanned()) {
-    let loaded = false;
-    try {
-      const r = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr', { headers: BINANCE_UA });
-      const d = await r.json();
-      if (Array.isArray(d) && d.length > 0) {
-        const sorted = sortUsdtByVol(d);
-        if (sorted.length > 0) {
-          tickerCache = sorted;
-          loaded = true;
-        }
-      } else checkBanResponse(d);
-    } catch { /* spot fallback */ }
-
-    if (!loaded) {
-      try {
-        const r2 = await fetch('https://api.binance.com/api/v3/ticker/24hr', { headers: BINANCE_UA });
-        const d2 = await r2.json();
-        if (Array.isArray(d2) && d2.length > 0) {
-          const sorted = sortUsdtByVol(d2);
-          if (sorted.length > 0) {
-            tickerCache = sorted;
-            loaded = true;
-          }
-        }
-      } catch { /* keep prior cache */ }
-    }
-  }
-
-  if (tickerCache.length === 0) tickerCache = syntheticTickers();
-
-  setTimeout(refreshTickers, 60000);
-}
 
 void refreshTickers();
 

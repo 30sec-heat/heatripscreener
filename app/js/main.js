@@ -1609,7 +1609,7 @@ let tF = '';
 let tSort = 'vol';
 async function fetchT() {
   try {
-    tickers = await (await fetch('/api/tickers')).json();
+    tickers = await (await fetch('/tickers.json')).json();
     renT();
   } catch (e) {}
 }
@@ -1737,9 +1737,8 @@ $chartCopy.addEventListener('click', async () => {
     setTf(Number(b.dataset.tf));
   });
   connectWS();
-  await fetchT();
-  await loadChart();
+  await Promise.all([fetchT(), loadChart()]);
   updSB();
   scheduleRedraw();
-  setInterval(fetchT, 60000);
+  setInterval(fetchT, 60_000);
 })();
