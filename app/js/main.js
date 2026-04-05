@@ -142,6 +142,7 @@ const ind = {
   vrng: false,
   volume: false,
   split: false,
+  mirrorly: false,
 };
 const PANEL_GAP = 4;
 /** Min height for all indicator rows combined (drag OHLC vs stack divider). */
@@ -229,6 +230,10 @@ document.querySelectorAll('input[data-ind]').forEach((inp) => {
   inp.addEventListener('change', () => {
     const kk = inp.dataset.ind;
     ind[kk] = inp.checked;
+    if (kk === 'mirrorly') {
+      if (ind.mirrorly) void refreshMirrorly();
+      else mirrorlyRows = [];
+    }
     if (kk === 'split' && ind.split) {
       exOn.delete('deribit');
       document.querySelector('[data-ex="deribit"]')?.classList.remove('on');
@@ -253,6 +258,8 @@ document.querySelectorAll('[data-ex]').forEach((b) => {
 let chartHistoryLoaded = false;
 
 let sym = 'BTCUSDT';
+/** Mirrorly overlay rows from GET /api/mirrorly (server-side aggregated). */
+let mirrorlyRows = [];
 let tf = 60;
 let vis = 1000;
 let scrollOff = 0;
@@ -297,6 +304,39 @@ function displayAllFromExt(ext) {
 
 function displayBarCount() {
   return displayAllFromExt(ext1mSeries()).length;
+}
+
+/** Map wall time to x in the visible slice (bar-open alignment + extrapolate past last close). */
+function mirrorlyXAt(shown, tMs, toX, cw) {
+  if (!shown.length || tMs == null || Number.isNaN(tMs)) return null;
+  if (tMs < shown[0].t) return null;
+  const last = shown[shown.length - 1];
+  const barMs = tf * 1000;
+  for (let i = 0; i < shown.length - 1; i++) {
+    if (shown[i].t <= tMs && tMs < shown[i + 1].t) {
+      const den = shown[i + 1].t - shown[i].t || 1;
+      const frac = (tMs - shown[i].t) / den;
+      return toX(i) + frac * (toX(i + 1) - toX(i));
+    }
+  }
+  if (tMs >= last.t) {
+    const frac = Math.min(2.5, (tMs - last.t) / barMs);
+    return toX(shown.length - 1) + frac * cw;
+  }
+  return toX(shown.length - 1);
+}
+
+async function refreshMirrorly() {
+  if (!ind.mirrorly) return;
+  try {
+    const r = await fetch(`/api/mirrorly?symbol=${encodeURIComponent(sym)}`, { cache: 'no-store' });
+    if (!r.ok) return;
+    const j = await r.json();
+    mirrorlyRows = Array.isArray(j.positions) ? j.positions : [];
+    scheduleRedraw();
+  } catch (_e) {
+    /* ignore */
+  }
 }
 
 function setTf(sec) {
@@ -1193,6 +1233,41 @@ function draw() {
       }
     } catch (_e) {}
 
+  if (ind.mirrorly && mirrorlyRows.length) {
+    const cw = (xRight - pL) / Math.max(1, v);
+    const xFor = (tMs) => mirrorlyXAt(shown, tMs, toX, cw);
+    for (const row of mirrorlyRows) {
+      const openMs = Date.parse(row.opened);
+      if (Number.isNaN(openMs)) continue;
+      const xO = xFor(openMs);
+      if (xO != null && xO >= pL && xO <= xRight) {
+        ctx.strokeStyle = row.side === 'short' ? chartTheme.mirrorlyShort : chartTheme.mirrorlyLong;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(xO, pT);
+        ctx.lineTo(xO, pT + priceOhlcH);
+        ctx.stroke();
+      }
+      if (row.closed) {
+        const closeMs = Date.parse(row.closed);
+        if (!Number.isNaN(closeMs)) {
+          const xC = xFor(closeMs);
+          if (xC != null && xC >= pL && xC <= xRight) {
+            ctx.strokeStyle = chartTheme.mirrorlyExit;
+            ctx.lineWidth = 1;
+            ctx.setLineDash([3, 4]);
+            ctx.beginPath();
+            ctx.moveTo(xC, pT);
+            ctx.lineTo(xC, pT + priceOhlcH);
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+        }
+      }
+    }
+  }
+
   ctx.restore();
 
   if (lastP != null && lastP >= lo && lastP <= hi) {
@@ -1629,6 +1704,7 @@ async function switchSym(s) {
   hlT(s);
   resub();
   await loadChart();
+  if (ind.mirrorly) void refreshMirrorly();
   updSB();
 }
 
@@ -1770,6 +1846,9 @@ $chartCopy.addEventListener('click', async () => {
   scheduleRedraw();
   setInterval(fetchT, 60_000);
   setInterval(refreshChartSilent, 180_000);
+  setInterval(() => {
+    if (ind.mirrorly) void refreshMirrorly();
+  }, 45_000);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
     refreshChartSilent();

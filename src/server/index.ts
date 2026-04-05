@@ -15,6 +15,7 @@ import {
   buildPerVenueOISymbol,
   sleep,
 } from '../shared/velo.js';
+import { startMirrorlyIngestion, getMirrorlyForChartSymbol } from './mirrorly.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_DIR = path.resolve(__dirname, '../../app');
@@ -183,6 +184,26 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (url.pathname === '/api/mirrorly') {
+    const symbol = url.searchParams.get('symbol') ?? 'BTCUSDT';
+    const positions = getMirrorlyForChartSymbol(symbol).map((p) => ({
+      positionId: p.positionId,
+      symbol: p.symbol,
+      side: p.side,
+      entryPrice: p.entryPrice,
+      name: p.name,
+      opened: new Date(p.openedMs).toISOString(),
+      closed: p.closedMs != null ? new Date(p.closedMs).toISOString() : null,
+    }));
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'public, max-age=8',
+    });
+    res.end(JSON.stringify({ positions }));
+    return;
+  }
+
   let filePath = path.join(APP_DIR, url.pathname === '/' ? 'index.html' : url.pathname);
   const ext = path.extname(filePath);
   try { const data = fs.readFileSync(filePath); res.writeHead(200, { 'Content-Type': MIME[ext] ?? 'application/octet-stream' }); res.end(data); }
@@ -190,6 +211,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 void refreshTickers();
+startMirrorlyIngestion();
 
 setupWebSocket(server);
 startVeloLivePoller();

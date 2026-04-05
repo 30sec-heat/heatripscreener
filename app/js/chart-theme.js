@@ -45,6 +45,9 @@ const chartThemeDark = {
   rsiArrowAboveStroke: '#1a080c',
   rsiArrowStrokeW: 1.15,
   annotStroke: 'rgba(230, 237, 232, 0.85)',
+  mirrorlyLong: 'rgba(18, 201, 127, 0.72)',
+  mirrorlyShort: 'rgba(232, 93, 111, 0.72)',
+  mirrorlyExit: 'rgba(155, 176, 200, 0.5)',
 };
 
 const chartThemeLight = {
@@ -92,6 +95,9 @@ const chartThemeLight = {
   rsiArrowAboveStroke: '#fff1f2',
   rsiArrowStrokeW: 1.15,
   annotStroke: 'rgba(15, 25, 35, 0.88)',
+  mirrorlyLong: 'rgba(13, 155, 92, 0.78)',
+  mirrorlyShort: 'rgba(209, 47, 69, 0.78)',
+  mirrorlyExit: 'rgba(90, 100, 115, 0.55)',
 };
 
 export let chartTheme = chartThemeDark;
