@@ -3,6 +3,8 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { SERVER_PORT, SYMBOLS, TICKER_FALLBACK, TIMEFRAMES } from '../shared/config.js';
+import { fetchPerpUsdtTickerRows, slimTickerRow } from '../shared/binance-markets.js';
+import { BUNDLED_TICKERS } from '../data/bundled-tickers.gen.js';
 import { setupWebSocket } from './ws-handler.js';
 import { startOIPoller, isBanned, checkBanResponse } from '../ingestion/oi-poller.js';
 import { startVeloLivePoller } from '../ingestion/velo-live-bars.js';
@@ -98,44 +100,22 @@ async function buildChartPayload(symbol: string, hours: number, perVenueOi: bool
   return last ?? buildChartPayloadOnce(symbol, 1, perVenueOi, now);
 }
 
-/** Shipped next to server — always present after git clone (Railway has no separate `app/` asset step). */
-const TICKERS_BUNDLED = path.join(__dirname, '../data/tickers-fallback.json');
 const TICKERS_SNAPSHOT = path.join(APP_DIR, 'tickers.json');
-const BINANCE_UA = { 'User-Agent': 'heat.rip-tickers/1 (+https://heat.rip)' };
 
 function syntheticTickers(): any[] {
-  return TICKER_FALLBACK.map((symbol) => ({
-    symbol,
-    lastPrice: '0',
-    priceChangePercent: '0',
-    quoteVolume: '0',
-  }));
-}
-
-function sortUsdtByVol(rows: any[]): any[] {
-  return rows
-    .filter((t: any) => t?.symbol?.endsWith?.('USDT'))
-    .sort((a: any, b: any) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume));
-}
-
-function slimTickerRow(t: any) {
-  return {
-    symbol: t.symbol,
-    lastPrice: String(t.lastPrice ?? 0),
-    priceChangePercent: String(t.priceChangePercent ?? 0),
-    quoteVolume: String(t.quoteVolume ?? 0),
-  };
+  return TICKER_FALLBACK.map((symbol) =>
+    slimTickerRow({ symbol, lastPrice: '0', priceChangePercent: '0', quoteVolume: '0' }),
+  );
 }
 
 function readTickerSnapshot(): any[] {
-  for (const p of [TICKERS_BUNDLED, TICKERS_SNAPSHOT]) {
-    try {
-      const raw = fs.readFileSync(p, 'utf8');
-      const d = JSON.parse(raw);
-      if (Array.isArray(d) && d.length > 0) return d;
-    } catch {
-      /* try next */
-    }
+  if (BUNDLED_TICKERS.length > 0) return BUNDLED_TICKERS.map((t) => ({ ...t }));
+  try {
+    const raw = fs.readFileSync(TICKERS_SNAPSHOT, 'utf8');
+    const d = JSON.parse(raw);
+    if (Array.isArray(d) && d.length > 0) return d;
+  } catch {
+    /* missing */
   }
   return syntheticTickers();
 }
@@ -144,39 +124,22 @@ let tickerCache: any[] = readTickerSnapshot();
 
 async function refreshTickers() {
   if (!isBanned()) {
-    let loaded = false;
-    try {
-      const r = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr', { headers: BINANCE_UA });
-      const d = await r.json();
-      if (Array.isArray(d) && d.length > 0) {
-        const sorted = sortUsdtByVol(d);
-        if (sorted.length > 0) {
-          tickerCache = sorted.map(slimTickerRow);
-          loaded = true;
-        }
-      } else checkBanResponse(d);
-    } catch { /* spot */ }
-
-    if (!loaded) {
-      try {
-        const r2 = await fetch('https://api.binance.com/api/v3/ticker/24hr', { headers: BINANCE_UA });
-        const d2 = await r2.json();
-        if (Array.isArray(d2) && d2.length > 0) {
-          const sorted = sortUsdtByVol(d2);
-          if (sorted.length > 0) {
-            tickerCache = sorted.map(slimTickerRow);
-            loaded = true;
-          }
-        }
-      } catch { /* keep snapshot */ }
-    }
-
-    if (loaded) {
+    const rows = await fetchPerpUsdtTickerRows();
+    if (rows && rows.length > 0) {
+      tickerCache = rows;
       try {
         fs.mkdirSync(path.dirname(TICKERS_SNAPSHOT), { recursive: true });
         fs.writeFileSync(TICKERS_SNAPSHOT, JSON.stringify(tickerCache));
       } catch {
         /* read-only fs */
+      }
+    } else {
+      try {
+        const r = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr');
+        const d = await r.json();
+        if (Array.isArray(d)) checkBanResponse(d);
+      } catch {
+        /* ignore */
       }
     }
   }
