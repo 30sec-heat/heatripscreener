@@ -20,6 +20,10 @@ function defaultFeedUrl(): string {
 const FEED_URL = process.env.MIRRORLY_FEED_URL ?? defaultFeedUrl();
 
 const DETAIL = (id: string) => `https://portal.mirrorly.xyz/api/live-trades/detail/${id}`;
+const TRADER_PROFILE_BASE = (process.env.MIRRORLY_TRADER_BASE ?? 'https://portal.mirrorly.xyz/trader').replace(
+  /\/$/,
+  '',
+);
 const DAY = 86400000;
 const PRUNE_CLOSED_AFTER_MS = 8 * DAY;
 const DISPLAY_CLOSED_MS = 7 * DAY;
@@ -32,11 +36,23 @@ export type MirrorlyPosition = {
   symbol: string;
   side: 'long' | 'short';
   entryPrice: number;
+  /** USD notional from feed/detail; used to merge multiple open legs into weighted avg entry. */
+  positionSize: number;
   name: string;
   openedMs: number;
   closedMs: number | null;
   lastSeenMs: number;
+  exchangeRef: string;
+  exchangeIdentifier: string;
+  unrealizedPnl: number | null;
+  realizedPnl: number | null;
 };
+
+export function mirrorlyProfileUrl(wallet: string): string {
+  const w = (wallet || '').trim();
+  if (w.startsWith('0x') && w.length === 42) return `${TRADER_PROFILE_BASE}/${encodeURIComponent(w)}`;
+  return 'https://portal.mirrorly.xyz/';
+}
 
 type DiskShape = { positions: Record<string, MirrorlyPosition> };
 
@@ -66,7 +82,17 @@ function loadDisk() {
     const d = JSON.parse(raw) as DiskShape;
     if (d?.positions && typeof d.positions === 'object') {
       for (const [k, v] of Object.entries(d.positions)) {
-        if (v && typeof v.openedMs === 'number' && v.positionId) store.set(k, v as MirrorlyPosition);
+        if (v && typeof v.openedMs === 'number' && v.positionId) {
+          const p = v as MirrorlyPosition;
+          store.set(k, {
+            ...p,
+            exchangeRef: p.exchangeRef ?? '',
+            exchangeIdentifier: p.exchangeIdentifier ?? '',
+            unrealizedPnl: p.unrealizedPnl ?? null,
+            realizedPnl: p.realizedPnl ?? null,
+            positionSize: typeof p.positionSize === 'number' && p.positionSize >= 0 ? p.positionSize : 0,
+          });
+        }
       }
     }
   } catch {
@@ -113,20 +139,34 @@ function applyFeed(obj: Record<string, unknown>) {
   const symbol = String(obj.symbol ?? '');
   const name = String(obj.name ?? '');
   const entryPrice = Number(obj.positionEntryPrice ?? obj.tradePrice ?? 0) || 0;
+  const nSz = Number(obj.positionSize);
+  const legSize = Number.isFinite(nSz) && nSz > 0 ? nSz : 0;
 
   const prev = store.get(positionId);
+  const exchangeRef = String(obj.exchangeRef ?? prev?.exchangeRef ?? '');
+  const exchangeIdentifier = String(obj.exchangeIdentifier ?? prev?.exchangeIdentifier ?? '');
+  const nu = Number(obj.positionUnrealizedPnL);
+  const nr = Number(obj.positionRealizedPnL);
+  const ntp = Number(obj.tradePnL);
 
   if (isClose) {
-    const openedMs = prev?.openedMs ?? (type === 'open' ? t : t);
+    const openedMs = prev?.openedMs ?? t;
+    const realizedPnl =
+      Number.isFinite(nr) ? nr : Number.isFinite(ntp) ? ntp : prev?.realizedPnl ?? null;
     const row: MirrorlyPosition = {
       positionId,
       symbol: symbol || prev?.symbol || '',
       side: prev?.side ?? side,
       entryPrice: entryPrice || prev?.entryPrice || 0,
+      positionSize: legSize || prev?.positionSize || 0,
       name: name || prev?.name || '',
       openedMs: prev?.openedMs ?? openedMs,
       closedMs: t,
       lastSeenMs: t,
+      exchangeRef: exchangeRef || prev?.exchangeRef || '',
+      exchangeIdentifier: exchangeIdentifier || prev?.exchangeIdentifier || '',
+      unrealizedPnl: null,
+      realizedPnl,
     };
     store.set(positionId, row);
     scheduleSave();
@@ -139,15 +179,22 @@ function applyFeed(obj: Record<string, unknown>) {
   let openedMs = prev?.openedMs ?? 0;
   if (type === 'open' || !openedMs) openedMs = t;
 
+  const unrealizedPnl = Number.isFinite(nu) ? nu : prev?.unrealizedPnl ?? null;
+
   const row: MirrorlyPosition = {
     positionId,
     symbol: symbol || prev?.symbol || '',
     side,
     entryPrice: entryPrice || prev?.entryPrice || 0,
+    positionSize: legSize || prev?.positionSize || 0,
     name: name || prev?.name || '',
     openedMs,
     closedMs: null,
     lastSeenMs: t,
+    exchangeRef: exchangeRef || prev?.exchangeRef || '',
+    exchangeIdentifier: exchangeIdentifier || prev?.exchangeIdentifier || '',
+    unrealizedPnl,
+    realizedPnl: null,
   };
   store.set(positionId, row);
   scheduleSave();
@@ -179,15 +226,36 @@ async function reconcileOnce() {
           const c = parseMirrorTime(String(doc.closed));
           if (c > 0) closedMs = c;
         }
+        const nup = Number(doc.positionUnrealizedPnL);
+        const nrp = Number(doc.positionRealizedPnL);
+        const isClosed = closedMs != null;
+        const nDocSz = Number(doc.positionSize);
+        const docSize =
+          !isClosed && Number.isFinite(nDocSz) && nDocSz > 0
+            ? nDocSz
+            : prev?.positionSize ?? 0;
         const row: MirrorlyPosition = {
           positionId: id,
           symbol: String(doc.symbol ?? prev?.symbol ?? ''),
           side,
           entryPrice: Number(doc.positionEntryPrice ?? prev?.entryPrice ?? 0) || 0,
+          positionSize: docSize,
           name: String(doc.name ?? prev?.name ?? ''),
           openedMs: openedMs || prev?.openedMs || Date.now(),
           closedMs: closedMs ?? prev?.closedMs ?? null,
           lastSeenMs: Date.now(),
+          exchangeRef: String(doc.exchangeRef ?? prev?.exchangeRef ?? ''),
+          exchangeIdentifier: String(doc.exchangeIdentifier ?? prev?.exchangeIdentifier ?? ''),
+          unrealizedPnl: isClosed
+            ? null
+            : Number.isFinite(nup)
+              ? nup
+              : prev?.unrealizedPnl ?? null,
+          realizedPnl: isClosed
+            ? Number.isFinite(nrp)
+              ? nrp
+              : prev?.realizedPnl ?? null
+            : null,
         };
         store.set(id, row);
       } catch {
@@ -251,21 +319,87 @@ async function runFeedLoop() {
   setTimeout(runFeedLoop, 2500);
 }
 
+function chartDedupeKey(p: MirrorlyPosition): string {
+  const w = (p.exchangeIdentifier || '').toLowerCase();
+  const sym = (p.symbol || '').toUpperCase();
+  return `${w}|${sym}`;
+}
+
+function mergeOpenMirrorlyGroup(rows: MirrorlyPosition[]): MirrorlyPosition {
+  const sorted = [...rows].sort((a, b) => a.openedMs - b.openedMs);
+  const anchor = [...sorted].sort((a, b) => b.lastSeenMs - a.lastSeenMs)[0];
+  let wSum = 0;
+  let pxSum = 0;
+  let nBare = 0;
+  let bareSum = 0;
+  for (const p of sorted) {
+    const w = p.positionSize > 0 && Number.isFinite(p.positionSize) ? p.positionSize : 0;
+    if (w > 0 && p.entryPrice > 0) {
+      wSum += p.entryPrice * w;
+      pxSum += w;
+    } else if (p.entryPrice > 0) {
+      bareSum += p.entryPrice;
+      nBare++;
+    }
+  }
+  let entryPrice = anchor.entryPrice;
+  if (pxSum > 0) entryPrice = wSum / pxSum;
+  else if (nBare > 0) entryPrice = bareSum / nBare;
+
+  const openedMs = Math.min(...sorted.map((r) => r.openedMs));
+  const lastSeenMs = Math.max(...sorted.map((r) => r.lastSeenMs));
+  const totalSz = sorted.reduce((s, r) => s + (r.positionSize > 0 ? r.positionSize : 0), 0);
+  return {
+    positionId: sorted.map((r) => r.positionId).join(','),
+    symbol: anchor.symbol,
+    side: anchor.side,
+    entryPrice,
+    positionSize: totalSz || anchor.positionSize,
+    name: anchor.name,
+    openedMs,
+    closedMs: null,
+    lastSeenMs,
+    exchangeRef: anchor.exchangeRef,
+    exchangeIdentifier: anchor.exchangeIdentifier,
+    unrealizedPnl: anchor.unrealizedPnl,
+    realizedPnl: null,
+  };
+}
+
+function pickLatestClosedMirrorly(rows: MirrorlyPosition[]): MirrorlyPosition {
+  return [...rows].sort((a, b) => (b.closedMs ?? 0) - (a.closedMs ?? 0))[0];
+}
+
 export function getMirrorlyForChartSymbol(chartSymbol: string): MirrorlyPosition[] {
   const b = veloBase(chartSymbol);
   const now = Date.now();
   const minClosed = now - DISPLAY_CLOSED_MS;
-  const out: MirrorlyPosition[] = [];
+  const candidates: MirrorlyPosition[] = [];
   for (const p of store.values()) {
     if (mirrorlyInstrumentBase(p.symbol) !== b) continue;
     if (p.closedMs == null) {
-      out.push(p);
+      candidates.push(p);
       continue;
     }
-    if (p.closedMs >= minClosed) out.push(p);
+    if (p.closedMs >= minClosed) candidates.push(p);
   }
-  out.sort((a, c) => c.openedMs - a.openedMs);
-  return out;
+  const byKey = new Map<string, MirrorlyPosition[]>();
+  for (const p of candidates) {
+    const k = chartDedupeKey(p);
+    if (!byKey.has(k)) byKey.set(k, []);
+    byKey.get(k)!.push(p);
+  }
+  const merged: MirrorlyPosition[] = [];
+  for (const arr of byKey.values()) {
+    const opens = arr.filter((p) => p.closedMs == null);
+    const closed = arr.filter((p) => p.closedMs != null);
+    if (opens.length > 0)
+      merged.push(opens.length === 1 ? opens[0] : mergeOpenMirrorlyGroup(opens));
+    else if (closed.length > 0)
+      merged.push(closed.length === 1 ? closed[0] : pickLatestClosedMirrorly(closed));
+  }
+  merged.sort((a, c) => c.openedMs - a.openedMs);
+  return merged;
 }
 
 export function startMirrorlyIngestion() {

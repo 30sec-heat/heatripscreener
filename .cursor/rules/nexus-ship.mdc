@@ -1,0 +1,16 @@
+---
+description: When finishing work on heat.rip / heatripscreener, commit and push to origin.
+alwaysApply: true
+---
+
+# Nexus (heat.rip) — ship when done
+
+When you **finish** a task or coherent batch of changes in this repo (`command-center/nexus`, heatripscreener / heat.rip):
+
+1. Run `git status` and confirm only intended files changed.
+2. **`git add`** the relevant paths, **`git commit`** with a short, clear message (what changed and why).
+3. **`git push origin main`** (or the current branch) so Railway/GitHub stay in sync.
+
+Do this **without** waiting for the user to ask, unless they explicitly asked to **not** commit or the tree is intentionally dirty.
+
+If there is nothing to commit, skip.

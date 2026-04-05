@@ -155,6 +155,7 @@ let lastLayout = null;
 let resizeDrag = null;
 const oscCache = { k: '', arr: [], p95: [], rsi: [], oscCrossSig: [] };
 const exOn = new Set(['binance-futures', 'bybit', 'okex-swap', 'deribit', 'hyperliquid']);
+const KNOWN_EX = ['binance-futures', 'bybit', 'okex-swap', 'deribit', 'hyperliquid'];
 
 let cacheKey = '';
 let cachedOI = null;
@@ -225,20 +226,22 @@ function invalidateOICaches() {
 }
 
 document.querySelectorAll('input[data-ind]').forEach((inp) => {
-  const k = inp.dataset.ind;
-  if (ind[k] !== undefined) inp.checked = !!ind[k];
   inp.addEventListener('change', () => {
     const kk = inp.dataset.ind;
     ind[kk] = inp.checked;
     if (kk === 'mirrorly') {
       if (ind.mirrorly) void refreshMirrorly();
-      else mirrorlyRows = [];
+      else {
+        mirrorlyRows = [];
+        hideMirrorlyTip();
+      }
     }
     if (kk === 'split' && ind.split) {
       exOn.delete('deribit');
       document.querySelector('[data-ex="deribit"]')?.classList.remove('on');
     }
     invalidateOISlice();
+    scheduleSaveUiConfig();
     if (kk === 'split') loadChart();
     else scheduleRedraw();
   });
@@ -250,6 +253,7 @@ document.querySelectorAll('[data-ex]').forEach((b) => {
     else exOn.add(k);
     b.classList.toggle('on', exOn.has(k));
     invalidateOISlice();
+    scheduleSaveUiConfig();
     scheduleRedraw();
   });
 });
@@ -260,6 +264,8 @@ let chartHistoryLoaded = false;
 let sym = 'BTCUSDT';
 /** Mirrorly overlay rows from GET /api/mirrorly (server-side aggregated). */
 let mirrorlyRows = [];
+/** Hit targets for hover: filled in draw() when Mirrorly is on. Canvas coords. */
+let mirrorlyHits = [];
 let tf = 60;
 let vis = 1000;
 let scrollOff = 0;
@@ -339,6 +345,142 @@ async function refreshMirrorly() {
   }
 }
 
+function mirrorlyExAbbrev(ref) {
+  if (!ref) return '—';
+  const k = ref.replace(/\s+/g, '').toLowerCase();
+  const map = {
+    hyperliquid: 'HL',
+    bybit: 'By',
+    binance: 'BN',
+    okx: 'OK',
+    deribit: 'Dr',
+    bitget: 'BG',
+    blofin: 'Bl',
+  };
+  if (map[k]) return map[k];
+  const alnum = ref.replace(/[^a-zA-Z0-9]/g, '');
+  if (alnum.length >= 2) return alnum.slice(0, 2).toUpperCase();
+  return ref.slice(0, 2).toUpperCase();
+}
+
+function mirrorlyPriceAtTime(shown, tMs) {
+  if (!shown.length) return null;
+  if (tMs < shown[0].t) return shown[0].c;
+  for (let i = 0; i < shown.length - 1; i++) {
+    if (shown[i].t <= tMs && tMs < shown[i + 1].t) return shown[i].c;
+  }
+  return shown[shown.length - 1].c;
+}
+
+function mirrorlyBadgePath(ctx, cx, cy, rw, rh, rad) {
+  const x = cx - rw / 2;
+  const y = cy - rh / 2;
+  const r = Math.min(rad, rw / 2, rh / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + rw - r, y);
+  ctx.quadraticCurveTo(x + rw, y, x + rw, y + r);
+  ctx.lineTo(x + rw, y + rh - r);
+  ctx.quadraticCurveTo(x + rw, y + rh, x + rw - r, y + rh);
+  ctx.lineTo(x + r, y + rh);
+  ctx.quadraticCurveTo(x, y + rh, x, y + rh - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+function drawMirrorlyMarkerBadge(ctx, cx, cy, label, fill, stroke, exitStroke) {
+  ctx.font = "700 8px 'IBM Plex Mono',monospace";
+  const rw = Math.max(24, 10 + ctx.measureText(label).width);
+  const rh = 14;
+  mirrorlyBadgePath(ctx, cx, cy, rw, rh, 3);
+  ctx.fillStyle = fill;
+  ctx.fill();
+  if (stroke) {
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 1;
+    if (exitStroke) {
+      ctx.setLineDash([2, 2]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    } else ctx.stroke();
+  }
+  ctx.fillStyle = chartTheme.mirrorlyBadgeText;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, cx, cy);
+}
+
+function mirrorlySidJit(key, salt) {
+  let h = 0;
+  const s = String(key) + String(salt);
+  for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  return (Math.abs(h) % 6) * 3;
+}
+
+function pickMirrorlyHit(mx, my) {
+  const rad = 18;
+  let best = null;
+  let bestD = rad;
+  for (const h of mirrorlyHits) {
+    const d = Math.hypot(mx - h.cx, my - h.cy);
+    if (d <= bestD) {
+      bestD = d;
+      best = h;
+    }
+  }
+  return best;
+}
+
+function mirrorlyTipEl() {
+  return document.getElementById('mirrorly-tip');
+}
+
+function showMirrorlyTip(row, kind, clientX, clientY) {
+  const tip = mirrorlyTipEl();
+  if (!tip) return;
+  tip.hidden = false;
+  tip.replaceChildren();
+  const t1 = document.createElement('div');
+  t1.className = 'mirrorly-tip-title';
+  t1.textContent = row.name || 'Trader';
+  const tk = document.createElement('div');
+  tk.className = 'mirrorly-tip-kind';
+  tk.textContent = kind === 'exit' ? 'Exit' : 'Entry';
+  const t2 = document.createElement('div');
+  t2.className = 'mirrorly-tip-meta';
+  const ab = mirrorlyExAbbrev(row.exchangeRef);
+  t2.textContent = `${ab} · ${row.exchangeRef || '—'} · ${row.side} ${row.symbol || ''}`;
+  const t3 = document.createElement('div');
+  t3.className = 'mirrorly-tip-pnl';
+  const open = !row.closed;
+  const pnlN = open ? row.unrealizedPnl : row.realizedPnl;
+  const pnlOk = pnlN != null && Number.isFinite(Number(pnlN));
+  t3.textContent = open
+    ? `Open uPnL: ${pnlOk ? fSignedN(Number(pnlN)) : '—'}`
+    : `Realized PnL: ${pnlOk ? fSignedN(Number(pnlN)) : '—'}`;
+  const a = document.createElement('a');
+  a.className = 'mirrorly-tip-link';
+  a.href = row.profileUrl || 'https://portal.mirrorly.xyz/';
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  a.textContent = 'Open Mirrorly profile →';
+  tip.append(t1, tk, t2, t3, a);
+  const pad = 10;
+  const tw = 288;
+  let left = clientX + 14;
+  let top = clientY + 14;
+  left = Math.max(pad, Math.min(left, window.innerWidth - tw - pad));
+  top = Math.max(pad, Math.min(top, window.innerHeight - 220));
+  tip.style.left = `${left}px`;
+  tip.style.top = `${top}px`;
+}
+
+function hideMirrorlyTip() {
+  const tip = mirrorlyTipEl();
+  if (tip) tip.hidden = true;
+}
+
 function setTf(sec) {
   const n = Number(sec);
   if (n !== 60 && n !== 300) return;
@@ -348,6 +490,7 @@ function setTf(sec) {
   invalidateOICaches();
   clamp();
   updSB();
+  scheduleSaveUiConfig();
   scheduleRedraw();
 }
 
@@ -479,6 +622,7 @@ function zoomVis(v) {
       loadMore();
     }, 300);
   }
+  scheduleSaveUiConfig();
 }
 
 cv.addEventListener(
@@ -629,15 +773,42 @@ window.addEventListener('mousemove', (e) => {
   showXH = mouseX >= 0 && mouseX <= r.width && mouseY >= 0 && mouseY <= r.height;
   if (!isDrag && !resizeDrag && !plotShiftDrag) {
     const my = e.clientY - r.top;
+    const mlOhlcTop = lastLayout?.ohlcTop ?? pT;
+    const mlNear =
+      ind.mirrorly &&
+      lastLayout?.pL != null &&
+      mouseX >= lastLayout.pL &&
+      mouseX <= lastLayout.xRight &&
+      my >= mlOhlcTop + 2 &&
+      my <= lastLayout.ohlcBottom - 2 &&
+      pickMirrorlyHit(mouseX, mouseY);
     if (lastLayout?.subsLen) {
       if (Math.abs(my - lastLayout.ohlcBottom) < 6) cv.style.cursor = 'ns-resize';
       else if (lastLayout.panelDividers.some((y) => Math.abs(my - y) < 5)) cv.style.cursor = 'ns-resize';
+      else if (mlNear) cv.style.cursor = 'pointer';
       else if (annotDrawOn) cv.style.cursor = 'crosshair';
       else if (my < lastLayout.ohlcBottom - 4)
         cv.style.cursor = e.altKey || e.metaKey ? 'grab' : 'crosshair';
       else cv.style.cursor = annotDrawOn ? 'crosshair' : 'default';
-    } else cv.style.cursor = annotDrawOn ? 'crosshair' : e.altKey || e.metaKey ? 'grab' : 'crosshair';
+    } else if (mlNear) cv.style.cursor = 'pointer';
+    else cv.style.cursor = annotDrawOn ? 'crosshair' : e.altKey || e.metaKey ? 'grab' : 'crosshair';
   }
+
+  if (ind.mirrorly && lastLayout?.pL != null) {
+    const my2 = mouseY;
+    const otop = lastLayout.ohlcTop ?? pT;
+    const overOhlc =
+      mouseX >= lastLayout.pL &&
+      mouseX <= lastLayout.xRight &&
+      my2 >= otop + 2 &&
+      my2 <= lastLayout.ohlcBottom - 2;
+    const overTip = e.target?.closest?.('#mirrorly-tip');
+    const mh = overOhlc && !isDrag && !resizeDrag && !plotShiftDrag ? pickMirrorlyHit(mouseX, mouseY) : null;
+    if (overTip) {
+      /* keep tooltip for link hover */
+    } else if (mh) showMirrorlyTip(mh.row, mh.kind, e.clientX, e.clientY);
+    else hideMirrorlyTip();
+  } else if (!e.target?.closest?.('#mirrorly-tip')) hideMirrorlyTip();
   const xhChanged = prevShowXH !== showXH;
   prevShowXH = showXH;
   const rx = Math.round(mouseX);
@@ -662,6 +833,7 @@ window.addEventListener('mouseup', () => {
     annotDrawing = null;
     scheduleRedraw();
   }
+  if (resizeDrag) scheduleSaveUiConfig();
   if (resizeDrag || isDrag || plotShiftDrag) scheduleRedraw();
   if (resizeDrag) resizeDrag = null;
   if (plotShiftDrag) {
@@ -682,11 +854,13 @@ cv.addEventListener('dblclick', () => {
   syncVisLabel();
   updSB();
   invalidateOISlice();
+  scheduleSaveUiConfig();
   scheduleRedraw();
 });
 cv.addEventListener('mouseleave', () => {
   showXH = false;
   prevShowXH = false;
+  hideMirrorlyTip();
   if (annotDrawing) {
     annotDrawing = null;
     scheduleRedraw();
@@ -1234,38 +1408,73 @@ function draw() {
     } catch (_e) {}
 
   if (ind.mirrorly && mirrorlyRows.length) {
+    mirrorlyHits.length = 0;
     const cw = (xRight - pL) / Math.max(1, v);
     const xFor = (tMs) => mirrorlyXAt(shown, tMs, toX, cw);
+    const yClamp = (y) => Math.max(pT + 11, Math.min(pT + priceOhlcH - 11, y));
     for (const row of mirrorlyRows) {
+      const exLab = mirrorlyExAbbrev(row.exchangeRef);
+      const sideTint = row.side === 'short' ? chartTheme.mirrorlyShort : chartTheme.mirrorlyLong;
       const openMs = Date.parse(row.opened);
       if (Number.isNaN(openMs)) continue;
       const xO = xFor(openMs);
-      if (xO != null && xO >= pL && xO <= xRight) {
-        ctx.strokeStyle = row.side === 'short' ? chartTheme.mirrorlyShort : chartTheme.mirrorlyLong;
-        ctx.lineWidth = 1;
-        ctx.setLineDash([]);
-        ctx.beginPath();
-        ctx.moveTo(xO, pT);
-        ctx.lineTo(xO, pT + priceOhlcH);
-        ctx.stroke();
-      }
+      if (xO == null || xO < pL || xO > xRight) continue;
+      const yPriceE = toY(row.entryPrice);
+      const yE = yClamp(yPriceE + mirrorlySidJit(row.positionId, 'en'));
+      ctx.strokeStyle = chartTheme.mirrorlyStem;
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.55;
+      ctx.beginPath();
+      ctx.moveTo(xO, yE);
+      ctx.lineTo(xO, yClamp(yPriceE));
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      drawMirrorlyMarkerBadge(
+        ctx,
+        xO,
+        yE,
+        exLab,
+        chartTheme.mirrorlyBadgeBg,
+        sideTint,
+        false,
+      );
+      mirrorlyHits.push({ cx: xO, cy: yE, row, kind: 'entry' });
+
       if (row.closed) {
         const closeMs = Date.parse(row.closed);
         if (!Number.isNaN(closeMs)) {
           const xC = xFor(closeMs);
           if (xC != null && xC >= pL && xC <= xRight) {
-            ctx.strokeStyle = chartTheme.mirrorlyExit;
+            const pxC = mirrorlyPriceAtTime(shown, closeMs);
+            const yPriceX = pxC != null ? toY(pxC) : yPriceE;
+            let yX = yClamp(yPriceX + mirrorlySidJit(row.positionId, 'ex'));
+            if (Math.abs(xO - xC) < 22 && Math.abs(yE - yX) < 10) yX = yClamp(yX + 14);
+            ctx.strokeStyle = chartTheme.mirrorlyStem;
             ctx.lineWidth = 1;
-            ctx.setLineDash([3, 4]);
+            ctx.globalAlpha = 0.45;
+            ctx.setLineDash([2, 3]);
             ctx.beginPath();
-            ctx.moveTo(xC, pT);
-            ctx.lineTo(xC, pT + priceOhlcH);
+            ctx.moveTo(xC, yX);
+            ctx.lineTo(xC, yClamp(yPriceX));
             ctx.stroke();
             ctx.setLineDash([]);
+            ctx.globalAlpha = 1;
+            drawMirrorlyMarkerBadge(
+              ctx,
+              xC,
+              yX,
+              exLab,
+              chartTheme.mirrorlyBadgeBgExit,
+              chartTheme.mirrorlyExit,
+              true,
+            );
+            mirrorlyHits.push({ cx: xC, cy: yX, row, kind: 'exit' });
           }
         }
       }
     }
+  } else {
+    mirrorlyHits.length = 0;
   }
 
   ctx.restore();
@@ -1477,7 +1686,10 @@ function draw() {
   }
 
   lastLayout = {
+    ohlcTop: pT,
     ohlcBottom: pT + ohlcH,
+    pL,
+    xRight,
     priceOhlcH,
     panelDividers: panelDividersY,
     indBody,
@@ -1682,6 +1894,7 @@ async function loadMore() {
   }
   updSB();
   scheduleRedraw();
+  scheduleSaveUiConfig();
 }
 
 async function switchSym(s) {
@@ -1706,11 +1919,118 @@ async function switchSym(s) {
   await loadChart();
   if (ind.mirrorly) void refreshMirrorly();
   updSB();
+  scheduleSaveUiConfig();
 }
 
 let tickers = [];
 let tF = '';
 let tSort = 'vol';
+
+const UI_CONFIG_KEY = 'heatrip-ui-v1';
+
+function saveUiConfig() {
+  try {
+    const payload = {
+      ind: { ...ind },
+      exOn: [...exOn].sort(),
+      tf,
+      sym,
+      vis,
+      targetVis,
+      ohlcFrac,
+      panelFracs: [...panelFracs],
+      tSort,
+      tF,
+      loadedHours: Math.min(72, Math.max(1, loadedHours | 0)),
+    };
+    localStorage.setItem(UI_CONFIG_KEY, JSON.stringify(payload));
+  } catch (_e) {
+    /* quota / private mode */
+  }
+}
+
+let saveUiTimer = null;
+function scheduleSaveUiConfig() {
+  if (saveUiTimer) clearTimeout(saveUiTimer);
+  saveUiTimer = setTimeout(() => {
+    saveUiTimer = null;
+    saveUiConfig();
+  }, 200);
+}
+
+function loadUiConfig() {
+  try {
+    const raw = localStorage.getItem(UI_CONFIG_KEY);
+    if (!raw) return;
+    const c = JSON.parse(raw);
+    if (!c || typeof c !== 'object') return;
+    if (c.ind && typeof c.ind === 'object') {
+      for (const key of Object.keys(ind)) {
+        if (typeof c.ind[key] === 'boolean') ind[key] = c.ind[key];
+      }
+    }
+    if (Array.isArray(c.exOn) && c.exOn.length > 0) {
+      const next = new Set();
+      for (const x of c.exOn) {
+        if (KNOWN_EX.includes(x)) next.add(x);
+      }
+      if (next.size > 0) {
+        exOn.clear();
+        for (const x of next) exOn.add(x);
+      }
+    }
+    if (c.tf === 60 || c.tf === 300) tf = c.tf;
+    if (typeof c.sym === 'string' && /^[A-Z0-9]{2,20}USDT$/i.test(c.sym)) sym = c.sym.toUpperCase();
+    if (typeof c.vis === 'number' && c.vis >= 10 && c.vis <= MAX_BARS) {
+      vis = c.vis | 0;
+      targetVis =
+        typeof c.targetVis === 'number'
+          ? Math.min(MAX_BARS, Math.max(10, c.targetVis | 0))
+          : vis;
+    }
+    if (
+      typeof c.ohlcFrac === 'number' &&
+      c.ohlcFrac >= OHLC_FRAC_MIN &&
+      c.ohlcFrac <= OHLC_FRAC_MAX
+    )
+      ohlcFrac = c.ohlcFrac;
+    if (Array.isArray(c.panelFracs)) {
+      const ok = c.panelFracs.filter((n) => typeof n === 'number' && n > 0 && Number.isFinite(n));
+      if (ok.length > 0) panelFracs = ok;
+    }
+    if (c.tSort === 'vol' || c.tSort === 'chg' || c.tSort === 'alpha') tSort = c.tSort;
+    if (typeof c.tF === 'string' && c.tF.length <= 160) tF = c.tF;
+    if (typeof c.loadedHours === 'number' && c.loadedHours >= 1 && c.loadedHours <= 72)
+      loadedHours = Math.floor(c.loadedHours);
+    if (ind.split) {
+      exOn.delete('deribit');
+    }
+  } catch (_e) {
+    /* corrupt */
+  }
+}
+
+function syncToolbarFromState() {
+  document.querySelectorAll('input[data-ind]').forEach((inp) => {
+    const k = inp.dataset.ind;
+    if (ind[k] !== undefined) inp.checked = !!ind[k];
+  });
+  document.querySelectorAll('[data-ex]').forEach((b) => b.classList.toggle('on', exOn.has(b.dataset.ex)));
+  document.querySelectorAll('[data-tf]').forEach((b) => b.classList.toggle('on', Number(b.dataset.tf) === tf));
+  const sortRoot = document.getElementById('sort-exg');
+  if (sortRoot) {
+    sortRoot.querySelectorAll('[data-tsort]').forEach((b) =>
+      b.classList.toggle('on', b.dataset.tsort === tSort),
+    );
+  }
+  const si = document.getElementById('si');
+  if (si) si.value = tF;
+  if ($pl) {
+    $pl.textContent = sym.replace('USDT', '/USDT');
+    document.title = 'heat.rip — ' + sym.replace('USDT', '/USDT');
+  }
+  syncVisLabel();
+}
 async function fetchT() {
   try {
     const r = await fetch('/api/tickers', { cache: 'no-store' });
@@ -1752,6 +2072,7 @@ $tl.addEventListener('click', (e) => {
 });
 $si.addEventListener('input', (e) => {
   tF = e.target.value;
+  scheduleSaveUiConfig();
   renT();
 });
 
@@ -1761,6 +2082,7 @@ $sortExg?.addEventListener('click', (e) => {
   if (!b) return;
   tSort = b.dataset.tsort;
   $sortExg.querySelectorAll('[data-tsort]').forEach((x) => x.classList.toggle('on', x === b));
+  scheduleSaveUiConfig();
   renT();
 });
 
@@ -1834,6 +2156,8 @@ $chartCopy.addEventListener('click', async () => {
 
 (async () => {
   initTheme();
+  loadUiConfig();
+  syncToolbarFromState();
   $('theme-toggle')?.addEventListener('click', toggleTheme);
   $('tf-exg')?.addEventListener('click', (e) => {
     const b = e.target.closest('[data-tf]');

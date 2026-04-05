@@ -15,7 +15,11 @@ import {
   buildPerVenueOISymbol,
   sleep,
 } from '../shared/velo.js';
-import { startMirrorlyIngestion, getMirrorlyForChartSymbol } from './mirrorly.js';
+import {
+  startMirrorlyIngestion,
+  getMirrorlyForChartSymbol,
+  mirrorlyProfileUrl,
+} from './mirrorly.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_DIR = path.resolve(__dirname, '../../app');
@@ -194,6 +198,11 @@ const server = http.createServer(async (req, res) => {
       name: p.name,
       opened: new Date(p.openedMs).toISOString(),
       closed: p.closedMs != null ? new Date(p.closedMs).toISOString() : null,
+      exchangeRef: p.exchangeRef,
+      exchangeIdentifier: p.exchangeIdentifier,
+      unrealizedPnl: p.unrealizedPnl,
+      realizedPnl: p.realizedPnl,
+      profileUrl: mirrorlyProfileUrl(p.exchangeIdentifier),
     }));
     res.writeHead(200, {
       'Content-Type': 'application/json',
