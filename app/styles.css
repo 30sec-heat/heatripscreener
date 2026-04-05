@@ -1123,7 +1123,8 @@ canvas {
   .sidebar-card {
     height: auto;
     max-height: none;
-    width: 14rem;
+    width: 16rem;
+    min-width: 16rem;
     max-width: none;
     flex: none;
   }
@@ -1131,7 +1132,8 @@ canvas {
 
 @media (min-width: 1024px) {
   .sidebar-card {
-    width: 15rem;
+    width: 18rem;
+    min-width: 18rem;
   }
 }
 
@@ -1225,7 +1227,7 @@ canvas {
 .ti-row {
   display: flex;
   cursor: pointer;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.5rem;
   border-bottom-width: 1px;
   border-color: color-mix(in srgb,var(--border) 85%,transparent);
@@ -1262,31 +1264,36 @@ canvas {
 .ti-row .ti-sym {
   min-width: 0px;
   flex: 1 1 0%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  -webkit-hyphens: auto;
+          hyphens: auto;
+  overflow-wrap: break-word;
   font-size: 0.875rem;
   line-height: 1.25rem;
   font-weight: 600;
+  line-height: 1.375;
   letter-spacing: -0.025em;
   color: var(--text);
 }
 
 @media (min-width: 640px) {
   .ti-row .ti-sym {
-    font-size: 1rem;
-    line-height: 1.5rem;
+    font-size: 0.8125rem;
+    line-height: 1.375;
   }
 }
 
+.ti-row .ti-sym {
+  overflow-wrap: anywhere;
+}
+
 .ti-row .ti-price {
-  width: 5.25rem;
-  min-width: 5.25rem;
+  width: 4.75rem;
+  min-width: 4.75rem;
   flex-shrink: 0;
+  align-self: center;
   text-align: right;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: 0.75rem;
-  line-height: 1rem;
+  font-size: 0.65rem;
   --tw-numeric-spacing: tabular-nums;
   font-variant-numeric: var(--tw-ordinal) var(--tw-slashed-zero) var(--tw-numeric-figure) var(--tw-numeric-spacing) var(--tw-numeric-fraction);
   line-height: 1;
@@ -1295,21 +1302,21 @@ canvas {
 
 @media (min-width: 640px) {
   .ti-row .ti-price {
-    width: 5.75rem;
-    min-width: 5.75rem;
-    font-size: 0.875rem;
-    line-height: 1.25rem;
+    width: 5.25rem;
+    min-width: 5.25rem;
+    font-size: 0.75rem;
+    line-height: 1rem;
   }
 }
 
 .ti-row .ti-ch {
-  width: 3.25rem;
-  min-width: 3.25rem;
+  width: 3rem;
+  min-width: 3rem;
   flex-shrink: 0;
+  align-self: center;
   text-align: right;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: 0.75rem;
-  line-height: 1rem;
+  font-size: 0.65rem;
   font-weight: 600;
   --tw-numeric-spacing: tabular-nums;
   font-variant-numeric: var(--tw-ordinal) var(--tw-slashed-zero) var(--tw-numeric-figure) var(--tw-numeric-spacing) var(--tw-numeric-fraction);
@@ -1318,10 +1325,10 @@ canvas {
 
 @media (min-width: 640px) {
   .ti-row .ti-ch {
-    width: 3.5rem;
-    min-width: 3.5rem;
-    font-size: 0.875rem;
-    line-height: 1.25rem;
+    width: 3.25rem;
+    min-width: 3.25rem;
+    font-size: 0.75rem;
+    line-height: 1rem;
   }
 }
 

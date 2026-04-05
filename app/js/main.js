@@ -1581,7 +1581,7 @@ function renT() {
     const col = ch >= 0 ? GLOW : EMBER;
     const s = ch >= 0 ? '+' : '';
     const a = t.symbol === sym ? 'active' : '';
-    h += `<div class="ti-row ${a}" data-sym="${t.symbol}"><span class="ti-sym">${t.symbol.replace('USDT', '')}</span><span class="ti-price">${fP(parseFloat(t.lastPrice))}</span><span class="ti-ch" style="color:${col}">${s}${ch.toFixed(2)}%</span></div>`;
+    h += `<div class="ti-row ${a}" data-sym="${t.symbol}" title="${t.symbol}"><span class="ti-sym">${t.symbol.replace('USDT', '')}</span><span class="ti-price">${fP(parseFloat(t.lastPrice))}</span><span class="ti-ch" style="color:${col}">${s}${ch.toFixed(2)}%</span></div>`;
   }
   $tl.innerHTML = h;
 }
