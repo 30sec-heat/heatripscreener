@@ -347,6 +347,7 @@ function mirrorlyXAt(shown, tMs, toX, cw) {
 
 async function refreshMirrorly() {
   if (!ind.mirrorly) return;
+  void loadExchangeLogoManifest();
   try {
     const r = await fetch(`/api/mirrorly?symbol=${encodeURIComponent(sym)}`, { cache: 'no-store' });
     if (!r.ok) return;
@@ -385,10 +386,111 @@ function mirrorlyPriceAtTime(shown, tMs) {
   return shown[shown.length - 1].c;
 }
 
+/** Candle whose interval contains tMs (for anchoring markers below the wick low). */
+function mirrorlyBarForTime(shown, tMs) {
+  if (!shown.length || tMs < shown[0].t) return null;
+  const last = shown[shown.length - 1];
+  const barMs = tf * 1000;
+  for (let i = 0; i < shown.length; i++) {
+    const b = shown[i];
+    const nextT = i + 1 < shown.length ? shown[i + 1].t : b.t + barMs;
+    if (b.t <= tMs && tMs < nextT) return b;
+  }
+  if (tMs >= last.t) return last;
+  return null;
+}
+
+let exchangeLogoManifest = null;
+let exchangeLogoManifestPromise = null;
+
+function loadExchangeLogoManifest() {
+  if (exchangeLogoManifest) return Promise.resolve(exchangeLogoManifest);
+  if (!exchangeLogoManifestPromise) {
+    exchangeLogoManifestPromise = fetch('/exchange-logos/manifest.json')
+      .then((r) => (r.ok ? r.json() : {}))
+      .then((j) => {
+        exchangeLogoManifest = j && typeof j === 'object' ? j : {};
+        scheduleRedraw();
+        return exchangeLogoManifest;
+      })
+      .catch(() => {
+        exchangeLogoManifest = {};
+        return exchangeLogoManifest;
+      });
+  }
+  return exchangeLogoManifestPromise;
+}
+
+function mirrorlyExchangeSlug(ref) {
+  const raw = String(ref || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '');
+  const table = {
+    binance: 'binance',
+    binancefutures: 'binance',
+    binanceus: 'binance',
+    hyperliquid: 'hyperliquid',
+    hl: 'hyperliquid',
+    bybit: 'bybit',
+    okx: 'okx',
+    okex: 'okx',
+    deribit: 'deribit',
+    bitget: 'bitget',
+    blofin: 'blofin',
+    gate: 'gate',
+    gateio: 'gate',
+    mexc: 'mexc',
+    kucoin: 'kucoin',
+    coinbase: 'coinbase',
+    kraken: 'kraken',
+  };
+  if (table[raw]) return table[raw];
+  if (raw.includes('binance')) return 'binance';
+  if (raw.includes('hyperliquid')) return 'hyperliquid';
+  if (raw.includes('bybit')) return 'bybit';
+  if (raw.includes('okx') || raw.includes('okex')) return 'okx';
+  if (raw.includes('deribit')) return 'deribit';
+  if (raw.includes('bitget')) return 'bitget';
+  if (raw.includes('gate')) return 'gate';
+  if (raw.includes('mexc')) return 'mexc';
+  if (raw.includes('kucoin')) return 'kucoin';
+  if (raw.includes('blofin')) return 'blofin';
+  const slug = raw.replace(/[^a-z0-9]/g, '');
+  return slug || 'unknown';
+}
+
+function mirrorlyLogoUrlForSlug(slug) {
+  if (!slug || slug === 'unknown') return null;
+  const f = exchangeLogoManifest && exchangeLogoManifest[slug];
+  return f ? `/exchange-logos/${f}` : null;
+}
+
+const mirrorlyLogoImgCache = new Map();
+
+function getMirrorlyLogoImg(slug) {
+  const url = mirrorlyLogoUrlForSlug(slug);
+  if (!url) return null;
+  let rec = mirrorlyLogoImgCache.get(slug);
+  if (rec === 'err') return null;
+  if (rec instanceof Image && rec.complete && rec.naturalWidth) return rec;
+  if (!rec) {
+    const img = new Image();
+    img.decoding = 'async';
+    img.onload = () => scheduleRedraw();
+    img.onerror = () => {
+      mirrorlyLogoImgCache.set(slug, 'err');
+      scheduleRedraw();
+    };
+    img.src = url;
+    mirrorlyLogoImgCache.set(slug, img);
+    return null;
+  }
+  return null;
+}
+
 function mirrorlyExchangeBrand(ref) {
-  const k = String(ref || '')
-    .replace(/\s+/g, '')
-    .toLowerCase();
+  const slug = mirrorlyExchangeSlug(ref);
   const map = {
     hyperliquid: { bg: '#152028', fg: '#5eead4', ring: '#34d399' },
     bybit: { bg: '#26150c', fg: '#ffb020', ring: '#ff8a3d' },
@@ -397,9 +499,14 @@ function mirrorlyExchangeBrand(ref) {
     deribit: { bg: '#1a1530', fg: '#c4b5fd', ring: '#a78bfa' },
     bitget: { bg: '#140f22', fg: '#22d3ee', ring: '#06b6d4' },
     blofin: { bg: '#121820', fg: '#93c5fd', ring: '#60a5fa' },
+    gate: { bg: '#141a22', fg: '#4fc3f7', ring: '#29b6f6' },
+    mexc: { bg: '#162018', fg: '#7ee787', ring: '#47d96a' },
+    kucoin: { bg: '#181420', fg: '#9fa8ff', ring: '#7c83ff' },
+    coinbase: { bg: '#161420', fg: '#a78bfa', ring: '#8b5cf6' },
+    kraken: { bg: '#121824', fg: '#7dd3fc', ring: '#38bdf8' },
   };
   const label = mirrorlyExAbbrev(ref);
-  if (map[k]) return { ...map[k], label };
+  if (map[slug]) return { ...map[slug], label };
   return {
     bg: chartTheme.mirrorlyIconFallbackBg,
     fg: chartTheme.mirrorlyIconFallbackFg,
@@ -408,38 +515,56 @@ function mirrorlyExchangeBrand(ref) {
   };
 }
 
-/** ~48px exchange disc + side ring; hit test uses generous radius. */
-function drawMirrorlyExchangeDisc(ctx, cx, cy, exchangeRef, sideTint, isExit) {
-  const R = 24;
+/** Small exchange disc (~24px) + optional logo; opacity from caller ctx.globalAlpha. */
+function drawMirrorlyExchangeDisc(ctx, cx, cy, exchangeRef, sideTint, isExit, R) {
+  const slug = mirrorlyExchangeSlug(exchangeRef);
+  const img = getMirrorlyLogoImg(slug);
   const brand = mirrorlyExchangeBrand(exchangeRef);
   const ringCol = isExit ? chartTheme.mirrorlyExit : sideTint || brand.ring;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
   ctx.beginPath();
   ctx.arc(cx, cy, R, 0, Math.PI * 2);
   ctx.fillStyle = brand.bg;
   ctx.fill();
+  if (img) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, Math.max(1, R - 1.25), 0, Math.PI * 2);
+    ctx.clip();
+    const pad = 1.5;
+    const iw = img.naturalWidth;
+    const ih = img.naturalHeight;
+    const scale = Math.min((2 * (R - pad)) / iw, (2 * (R - pad)) / ih);
+    const dw = iw * scale;
+    const dh = ih * scale;
+    ctx.drawImage(img, cx - dw / 2, cy - dh / 2, dw, dh);
+    ctx.restore();
+  } else {
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = brand.fg;
+    ctx.font = `800 ${Math.max(6, Math.round(R * 0.55))}px 'DM Sans', 'IBM Plex Mono', sans-serif`;
+    ctx.fillText(brand.label, cx, cy + 0.5);
+  }
   ctx.strokeStyle = ringCol;
-  ctx.lineWidth = isExit ? 2.5 : 3.25;
+  ctx.lineWidth = isExit ? 1.35 : 1.6;
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, Math.PI * 2);
   if (isExit) {
-    ctx.setLineDash([4, 3]);
+    ctx.setLineDash([3, 2]);
     ctx.stroke();
     ctx.setLineDash([]);
   } else ctx.stroke();
-  ctx.fillStyle = brand.fg;
-  ctx.font = "800 14px 'IBM Plex Mono', monospace";
-  ctx.fillText(brand.label, cx, cy + 0.5);
 }
 
 function mirrorlySidJit(key, salt) {
   let h = 0;
   const s = String(key) + String(salt);
   for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
-  return (Math.abs(h) % 6) * 3;
+  return (Math.abs(h) % 6) * 2;
 }
 
 function pickMirrorlyHit(mx, my) {
-  const rad = 40;
+  const rad = 18;
   let best = null;
   let bestD = rad;
   for (const h of mirrorlyHits) {
@@ -481,10 +606,17 @@ function showMirrorlyTip(row, kind, clientX, clientY) {
   head.className = 'mirrorly-tip-head';
   const icon = document.createElement('div');
   icon.className = 'mirrorly-tip-exicon';
-  icon.textContent = mirrorlyExAbbrev(row.exchangeRef);
   icon.style.background = brand.bg;
   icon.style.color = brand.fg;
   icon.style.setProperty('--mirrorly-ring', brand.ring);
+  const logoTip = mirrorlyLogoUrlForSlug(mirrorlyExchangeSlug(row.exchangeRef));
+  if (logoTip) {
+    const im = document.createElement('img');
+    im.className = 'mirrorly-tip-exicon-img';
+    im.src = logoTip;
+    im.alt = '';
+    icon.appendChild(im);
+  } else icon.textContent = mirrorlyExAbbrev(row.exchangeRef);
 
   const headText = document.createElement('div');
   headText.className = 'mirrorly-tip-headtext';
@@ -720,21 +852,68 @@ function zoomVis(v) {
   scheduleSaveUiConfig();
 }
 
+/** Normalize wheel deltas to ~pixel units so LINE/PAGE devices match trackpads. */
+function wheelPixelDeltas(e) {
+  let dy = e.deltaY;
+  let dx = e.deltaX;
+  if (e.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+    dy *= 16;
+    dx *= 16;
+  } else if (e.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+    dy *= 400;
+    dx *= 400;
+  }
+  return { dx, dy };
+}
+
+/** Let browser handle wheel when pointer is over a scrollable ancestor that can still move. */
+function nativeWheelAllowed(e) {
+  const { dx, dy } = wheelPixelDeltas(e);
+  let el = e.target.nodeType === Node.ELEMENT_NODE ? e.target : e.target.parentElement;
+  for (; el && el !== document.documentElement; el = el.parentElement) {
+    const st = getComputedStyle(el);
+    const oy = st.overflowY;
+    const ox = st.overflowX;
+    const yScroll =
+      (oy === 'auto' || oy === 'scroll' || oy === 'overlay') && el.scrollHeight > el.clientHeight + 1;
+    const xScroll =
+      (ox === 'auto' || ox === 'scroll' || ox === 'overlay') && el.scrollWidth > el.clientWidth + 1;
+    if (yScroll && dy !== 0) {
+      const maxY = el.scrollHeight - el.clientHeight;
+      const top = el.scrollTop;
+      if ((dy < 0 && top > 0.5) || (dy > 0 && top < maxY - 0.5)) return true;
+    }
+    if (xScroll && dx !== 0) {
+      const maxX = el.scrollWidth - el.clientWidth;
+      const left = el.scrollLeft;
+      if ((dx < 0 && left > 0.5) || (dx > 0 && left < maxX - 0.5)) return true;
+    }
+  }
+  return false;
+}
+
 cv.addEventListener(
   'wheel',
   (e) => {
     e.preventDefault();
+    const { dy } = wheelPixelDeltas(e);
+    if (dy === 0 && !e.shiftKey) return;
     if (e.shiftKey) {
       const step = Math.max(1, Math.round(vis * 0.05));
       const prevOff = scrollOff;
-      scrollOff = scrollOff + Math.sign(e.deltaY) * step;
+      const mag = Math.min(6, Math.max(1, Math.round(Math.abs(dy) / 50)));
+      scrollOff = scrollOff + Math.sign(dy) * step * mag;
       autoScr = false;
       clamp();
       updSB();
       if (scrollOff !== prevOff) invalidateOISlice();
       scheduleRedraw();
     } else {
-      zoomVis(vis + Math.sign(e.deltaY) * Math.max(2, Math.round(vis * 0.08)));
+      const dir = Math.sign(dy);
+      if (dir === 0) return;
+      const mag = Math.min(8, Math.max(1, Math.round(Math.abs(dy) / 48)));
+      const step = Math.max(2, Math.round(vis * 0.08));
+      zoomVis(vis + dir * step * mag);
     }
   },
   { passive: false }
@@ -742,7 +921,7 @@ cv.addEventListener(
 document.addEventListener(
   'wheel',
   (e) => {
-    if (e.target.closest('#tl')) return;
+    if (nativeWheelAllowed(e)) return;
     e.preventDefault();
   },
   { passive: false }
@@ -1506,24 +1685,28 @@ function draw() {
     mirrorlyHits.length = 0;
     const cw = (xRight - pL) / Math.max(1, v);
     const xFor = (tMs) => mirrorlyXAt(shown, tMs, toX, cw);
-    const yClamp = (y) => Math.max(pT + 26, Math.min(pT + priceOhlcH - 26, y));
+    const MR = 12;
+    const bubGap = 5;
+    const yClampM = (y) => Math.max(pT + MR + 5, Math.min(pT + priceOhlcH - MR - 5, y));
+    ctx.save();
+    ctx.globalAlpha = 0.4;
     for (const row of mirrorlyRows) {
       const sideTint = row.side === 'short' ? chartTheme.mirrorlyShort : chartTheme.mirrorlyLong;
       const openMs = Date.parse(row.opened);
       if (Number.isNaN(openMs)) continue;
       const xO = xFor(openMs);
       if (xO == null || xO < pL || xO > xRight) continue;
+      const barE = mirrorlyBarForTime(shown, openMs);
       const yPriceE = toY(row.entryPrice);
-      const yE = yClamp(yPriceE + mirrorlySidJit(row.positionId, 'en'));
+      const yLowE = barE ? toY(barE.l) : yPriceE;
+      const yE = yClampM(yLowE + MR + bubGap + mirrorlySidJit(row.positionId, 'en') * 0.35);
       ctx.strokeStyle = chartTheme.mirrorlyStem;
       ctx.lineWidth = 1;
-      ctx.globalAlpha = 0.55;
       ctx.beginPath();
       ctx.moveTo(xO, yE);
-      ctx.lineTo(xO, yClamp(yPriceE));
+      ctx.lineTo(xO, yClampM(yLowE));
       ctx.stroke();
-      ctx.globalAlpha = 1;
-      drawMirrorlyExchangeDisc(ctx, xO, yE, row.exchangeRef, sideTint, false);
+      drawMirrorlyExchangeDisc(ctx, xO, yE, row.exchangeRef, sideTint, false, MR);
       mirrorlyHits.push({ cx: xO, cy: yE, row, kind: 'entry' });
 
       if (row.closed) {
@@ -1533,24 +1716,25 @@ function draw() {
           if (xC != null && xC >= pL && xC <= xRight) {
             const pxC = mirrorlyPriceAtTime(shown, closeMs);
             const yPriceX = pxC != null ? toY(pxC) : yPriceE;
-            let yX = yClamp(yPriceX + mirrorlySidJit(row.positionId, 'ex'));
-            if (Math.abs(xO - xC) < 30 && Math.abs(yE - yX) < 14) yX = yClamp(yX + 18);
+            const barX = mirrorlyBarForTime(shown, closeMs);
+            const yLowX = barX ? toY(barX.l) : yPriceX;
+            let yX = yClampM(yLowX + MR + bubGap + mirrorlySidJit(row.positionId, 'ex') * 0.35);
+            if (Math.abs(xO - xC) < 22 && Math.abs(yE - yX) < 12) yX = yClampM(yX + 14);
             ctx.strokeStyle = chartTheme.mirrorlyStem;
             ctx.lineWidth = 1;
-            ctx.globalAlpha = 0.45;
             ctx.setLineDash([2, 3]);
             ctx.beginPath();
             ctx.moveTo(xC, yX);
-            ctx.lineTo(xC, yClamp(yPriceX));
+            ctx.lineTo(xC, yClampM(yLowX));
             ctx.stroke();
             ctx.setLineDash([]);
-            ctx.globalAlpha = 1;
-            drawMirrorlyExchangeDisc(ctx, xC, yX, row.exchangeRef, chartTheme.mirrorlyExit, true);
+            drawMirrorlyExchangeDisc(ctx, xC, yX, row.exchangeRef, chartTheme.mirrorlyExit, true, MR);
             mirrorlyHits.push({ cx: xC, cy: yX, row, kind: 'exit' });
           }
         }
       }
     }
+    ctx.restore();
   } else {
     mirrorlyHits.length = 0;
   }
@@ -2243,7 +2427,7 @@ $chartCopy.addEventListener('click', async () => {
     setTf(Number(b.dataset.tf));
   });
   connectWS();
-  await Promise.all([fetchT(), loadChart()]);
+  await Promise.all([loadExchangeLogoManifest(), fetchT(), loadChart()]);
   updSB();
   scheduleRedraw();
   setInterval(fetchT, 60_000);

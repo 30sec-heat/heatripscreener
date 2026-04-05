@@ -273,10 +273,14 @@
   }
 
   .mirrorly-tip-exicon {
-    @apply flex h-12 w-12 shrink-0 items-center justify-center rounded-xl font-mono text-[0.76rem] font-extrabold leading-none tracking-tight;
+    @apply relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl font-mono text-[0.76rem] font-extrabold leading-none tracking-tight;
     box-shadow:
       0 0 0 2px color-mix(in srgb, var(--mirrorly-ring, var(--border)) 55%, transparent),
       0 4px 12px rgba(0, 0, 0, 0.18);
+  }
+
+  .mirrorly-tip-exicon-img {
+    @apply h-[72%] w-[72%] object-contain;
   }
 
   .mirrorly-tip-headtext {

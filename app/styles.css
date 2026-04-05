@@ -1377,12 +1377,14 @@ html[data-theme='light'] .mirrorly-tip-card {
 }
 
 .mirrorly-tip-exicon {
+  position: relative;
   display: flex;
   height: 3rem;
   width: 3rem;
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
   border-radius: 0.75rem;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 0.76rem;
@@ -1392,6 +1394,13 @@ html[data-theme='light'] .mirrorly-tip-card {
   box-shadow:
       0 0 0 2px color-mix(in srgb, var(--mirrorly-ring, var(--border)) 55%, transparent),
       0 4px 12px rgba(0, 0, 0, 0.18);
+}
+
+.mirrorly-tip-exicon-img {
+  height: 72%;
+  width: 72%;
+  -o-object-fit: contain;
+     object-fit: contain;
 }
 
 .mirrorly-tip-headtext {
@@ -1569,6 +1578,10 @@ html[data-theme='light'] .mirrorly-tip-card {
   display: block;
 }
 
+.table {
+  display: table;
+}
+
 .grid {
   display: grid;
 }
@@ -1603,6 +1616,10 @@ html[data-theme='light'] .mirrorly-tip-card {
 
 .overflow-y-auto {
   overflow-y: auto;
+}
+
+.outline {
+  outline-style: solid;
 }
 
 .ring {
