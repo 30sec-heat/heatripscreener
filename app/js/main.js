@@ -1236,8 +1236,8 @@ function draw() {
   const priceOhlcH = ohlcH - volGutter;
   const cW = xRight - pL;
   const cw = cW / v;
-  const bW = Math.max(1, Math.min(cw * 0.72, 14));
-  const wkW = Math.max(1.15, Math.min(bW * 0.18, 2.15));
+  const bW = Math.max(1, Math.min(cw * 0.78, 15.5));
+  const wkW = Math.max(1.2, Math.min(bW * 0.19, 2.35));
   const toX = (i) => pL + i * cw + cw / 2 + plotShiftX;
   const toY = (p) => pT + (1 - (p - lo) / pRn) * priceOhlcH;
 
