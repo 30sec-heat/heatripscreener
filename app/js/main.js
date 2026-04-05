@@ -343,6 +343,7 @@ function connectWS() {
         c: m.bar.close,
         v: m.bar.volume,
       };
+      lastP = m.bar.close;
       invalidateOISlice();
       scheduleLiveRedraw();
       return;

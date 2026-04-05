@@ -1,6 +1,6 @@
 # heatripscreener
 
-Chart + OI screener for **heat.rip** — Binance-driven live bars, multi-venue USD open interest, net long/short panels. **No database**; history comes from Velo, live state is in memory.
+Chart + OI screener for **heat.rip** — **Velo** for historical and **live 1m** candles (polled; forming bar = Velo’s current bucket), multi-venue USD OI from Velo, Binance **REST** for ticker list + open interest. **No database**.
 
 ## Run locally
 
@@ -26,7 +26,7 @@ Optional: copy `.env.example` to `.env` if you override `PORT`.
 |---------------------|----------------------------------------------|
 | `npm start`         | Production server (Railway)                  |
 | `npm run server`    | Same                                         |
-| `npm run ingest`    | Standalone Binance WS (no HTTP UI)         |
+| `npm run ingest`    | Velo live poller + OI only (no HTTP / WS UI) |
 | `npm run build:css` | Rebuild `app/styles.css` from Tailwind      |
 
 ## License

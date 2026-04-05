@@ -3,9 +3,9 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { SERVER_PORT, SYMBOLS, TIMEFRAMES } from '../shared/config.js';
-import { startBinanceIngestion } from '../ingestion/binance-ws.js';
 import { setupWebSocket } from './ws-handler.js';
 import { startOIPoller, isBanned, checkBanResponse } from '../ingestion/oi-poller.js';
+import { startVeloLivePoller } from '../ingestion/velo-live-bars.js';
 import { fetchVeloRaw, ALL_EXCHANGES } from '../shared/velo.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -105,7 +105,7 @@ async function refreshTickers() {
 setTimeout(refreshTickers, 3000);
 
 setupWebSocket(server);
-startBinanceIngestion(SYMBOLS);
+startVeloLivePoller(SYMBOLS);
 startOIPoller(SYMBOLS, TIMEFRAMES, 60000);
 
 server.listen(SERVER_PORT, '0.0.0.0', () => {
