@@ -198,7 +198,7 @@
   }
 
   .sidebar-card {
-    @apply flex max-h-[42vh] min-h-0 w-full shrink-0 flex-col overflow-hidden bg-panel md:max-h-none md:h-auto md:w-64 md:min-w-[16rem] md:max-w-none md:flex-none lg:w-72 lg:min-w-[18rem];
+    @apply flex max-h-[min(58vh,36rem)] min-h-0 w-full shrink-0 flex-col overflow-hidden bg-panel md:max-h-none md:h-auto md:w-64 md:min-w-[16rem] md:max-w-none md:flex-none lg:w-72 lg:min-w-[18rem];
   }
 
   .mkt-ts {

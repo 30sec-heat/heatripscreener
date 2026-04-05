@@ -1110,7 +1110,7 @@ canvas {
 
 .sidebar-card {
   display: flex;
-  max-height: 42vh;
+  max-height: min(58vh, 36rem);
   min-height: 0px;
   width: 100%;
   flex-shrink: 0;

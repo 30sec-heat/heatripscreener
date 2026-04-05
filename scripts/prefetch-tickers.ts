@@ -5,7 +5,9 @@ import { TICKER_FALLBACK } from '../src/shared/config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_DIR = path.resolve(__dirname, '../app');
-const OUT = path.join(APP_DIR, 'tickers.json');
+const DATA_DIR = path.resolve(__dirname, '../src/data');
+const OUT_APP = path.join(APP_DIR, 'tickers.json');
+const OUT_BUNDLED = path.join(DATA_DIR, 'tickers-fallback.json');
 const UA = { 'User-Agent': 'heat.rip-prefetch/1 (+https://heat.rip)' };
 
 function slim(t: any) {
@@ -52,9 +54,12 @@ async function main() {
     }
   }
   if (!rows || rows.length === 0) rows = synthetic();
-  fs.mkdirSync(path.dirname(OUT), { recursive: true });
-  fs.writeFileSync(OUT, JSON.stringify(rows));
-  console.log(`[prefetch-tickers] wrote ${rows.length} rows -> ${OUT}`);
+  const payload = JSON.stringify(rows);
+  fs.mkdirSync(path.dirname(OUT_APP), { recursive: true });
+  fs.mkdirSync(path.dirname(OUT_BUNDLED), { recursive: true });
+  fs.writeFileSync(OUT_APP, payload);
+  fs.writeFileSync(OUT_BUNDLED, payload);
+  console.log(`[prefetch-tickers] wrote ${rows.length} rows -> ${OUT_APP} + ${OUT_BUNDLED}`);
 }
 
 await main();

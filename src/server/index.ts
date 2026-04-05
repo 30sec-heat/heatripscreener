@@ -98,6 +98,8 @@ async function buildChartPayload(symbol: string, hours: number, perVenueOi: bool
   return last ?? buildChartPayloadOnce(symbol, 1, perVenueOi, now);
 }
 
+/** Shipped next to server — always present after git clone (Railway has no separate `app/` asset step). */
+const TICKERS_BUNDLED = path.join(__dirname, '../data/tickers-fallback.json');
 const TICKERS_SNAPSHOT = path.join(APP_DIR, 'tickers.json');
 const BINANCE_UA = { 'User-Agent': 'heat.rip-tickers/1 (+https://heat.rip)' };
 
@@ -126,12 +128,14 @@ function slimTickerRow(t: any) {
 }
 
 function readTickerSnapshot(): any[] {
-  try {
-    const raw = fs.readFileSync(TICKERS_SNAPSHOT, 'utf8');
-    const d = JSON.parse(raw);
-    if (Array.isArray(d) && d.length > 0) return d;
-  } catch {
-    /* missing or corrupt */
+  for (const p of [TICKERS_BUNDLED, TICKERS_SNAPSHOT]) {
+    try {
+      const raw = fs.readFileSync(p, 'utf8');
+      const d = JSON.parse(raw);
+      if (Array.isArray(d) && d.length > 0) return d;
+    } catch {
+      /* try next */
+    }
   }
   return syntheticTickers();
 }
@@ -169,6 +173,7 @@ async function refreshTickers() {
 
     if (loaded) {
       try {
+        fs.mkdirSync(path.dirname(TICKERS_SNAPSHOT), { recursive: true });
         fs.writeFileSync(TICKERS_SNAPSHOT, JSON.stringify(tickerCache));
       } catch {
         /* read-only fs */
