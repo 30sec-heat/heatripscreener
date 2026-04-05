@@ -1,10 +1,10 @@
 /** Chart colors: dark (default) and light — use `setChartTheme(isLight)` to switch. */
 
 const chartThemeDark = {
-  bg: '#12151a',
-  grid: 'rgba(230, 237, 232, 0.09)',
-  gridMinor: 'rgba(230, 237, 232, 0.045)',
-  gridText: '#8a9690',
+  bg: '#181b21',
+  grid: 'rgba(230, 237, 232, 0.12)',
+  gridMinor: 'rgba(230, 237, 232, 0.06)',
+  gridText: '#97a39a',
   wickBull: '#4ed49a',
   wickBear: '#f08090',
   bull: '#12c97f',
@@ -59,10 +59,10 @@ const chartThemeDark = {
 };
 
 const chartThemeLight = {
-  bg: '#eef1f4',
-  grid: 'rgba(15, 25, 35, 0.07)',
-  gridMinor: 'rgba(15, 25, 35, 0.035)',
-  gridText: '#5c6570',
+  bg: '#ffffff',
+  grid: 'rgba(15, 25, 35, 0.09)',
+  gridMinor: 'rgba(15, 25, 35, 0.045)',
+  gridText: '#4a5568',
   wickBull: '#0a9f62',
   wickBear: '#c73e4e',
   bull: '#0d9b5c',

@@ -15,7 +15,7 @@ import { computeRSI } from './rsi.js';
 import { aggregateOHLCVFrom1m, downsampleCumToTf, aggregatePerExOiToTf } from './timeframe.js';
 
 const cv = document.getElementById('cv');
-const ctx = cv.getContext('2d');
+const ctx = cv.getContext('2d', { alpha: false, colorSpace: 'srgb' });
 let W, H;
 
 let rafDraw = 0;
@@ -49,24 +49,28 @@ function scheduleLiveRedraw() {
 function resize() {
   const parent = cv.parentElement;
   if (!parent) return;
-  const rc = parent.getBoundingClientRect();
-  const cssW = Math.max(1, rc.width);
-  const cssH = Math.max(1, rc.height);
-  W = cssW;
-  H = cssH;
+  const W0 = Math.max(1, Math.floor(parent.clientWidth || 0));
+  const H0 = Math.max(1, Math.floor(parent.clientHeight || 0));
+  W = W0;
+  H = H0;
   const dpr = Math.min(4, Math.max(1, window.devicePixelRatio || 1));
-  const bw = Math.max(1, Math.round(cssW * dpr));
-  const bh = Math.max(1, Math.round(cssH * dpr));
-  cv.style.width = `${cssW}px`;
-  cv.style.height = `${cssH}px`;
+  const bw = Math.max(1, Math.round(W * dpr));
+  const bh = Math.max(1, Math.round(H * dpr));
+  cv.style.width = `${W}px`;
+  cv.style.height = `${H}px`;
   cv.width = bw;
   cv.height = bh;
-  ctx.setTransform(bw / cssW, 0, 0, bh / cssH, 0, 0);
+  ctx.setTransform(bw / W, 0, 0, bh / H, 0, 0);
+  ctx.imageSmoothingEnabled = true;
   scheduleRedraw();
 }
 resize();
 window.addEventListener('resize', resize);
 if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
+if (cv.parentElement && typeof ResizeObserver !== 'undefined') {
+  const ro = new ResizeObserver(() => resize());
+  ro.observe(cv.parentElement);
+}
 
 const THEME_KEY = 'heatrip-theme';
 
@@ -102,7 +106,7 @@ function drawVerticalGrid(ctx, pL, xRight, yTop, yBot) {
     const gx = pL + (g / V_GRID_DIVS) * (xRight - pL);
     const strong = g % 2 === 0;
     ctx.strokeStyle = strong ? chartTheme.grid : chartTheme.gridMinor;
-    ctx.lineWidth = strong ? 0.7 : 0.45;
+    ctx.lineWidth = strong ? 1 : 0.55;
     ctx.beginPath();
     ctx.moveTo(gx, yTop);
     ctx.lineTo(gx, yBot);
@@ -116,7 +120,7 @@ function drawHorizontalGridBands(ctx, pL, xRight, yTop, height, nMajor) {
   for (let i = 0; i <= n; i++) {
     const y = yTop + (i / n) * height;
     ctx.strokeStyle = chartTheme.grid;
-    ctx.lineWidth = 0.7;
+    ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(pL, y);
     ctx.lineTo(xRight, y);
@@ -125,7 +129,7 @@ function drawHorizontalGridBands(ctx, pL, xRight, yTop, height, nMajor) {
   for (let i = 0; i < n; i++) {
     const y = yTop + ((i + 0.5) / n) * height;
     ctx.strokeStyle = chartTheme.gridMinor;
-    ctx.lineWidth = 0.45;
+    ctx.lineWidth = 0.55;
     ctx.beginPath();
     ctx.moveTo(pL, y);
     ctx.lineTo(xRight, y);
