@@ -1,6 +1,6 @@
 export const GLOW = '#0ecb81';
 export const EMBER = '#f6465d';
-export const BLUE = '#6ee7b4';
+export const BLUE = '#f0b90b';
 export const MAX_BARS = 8000;
 
 export const EX_COLORS = {
@@ -8,7 +8,7 @@ export const EX_COLORS = {
   bybit: '#ff8a3d',
   'okex-swap': '#ffffff',
   deribit: '#a78bfa',
-  hyperliquid: '#34d399',
+  hyperliquid: '#2ebd85',
 };
 
 export const EX_SHORT = {
