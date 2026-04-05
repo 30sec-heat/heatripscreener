@@ -26,6 +26,73 @@ async function fetchVelo(symbol: string, res: number, begin: number, end: number
   return fetchVeloRaw(symbol, res, begin, end);
 }
 
+/** Bounded parallel HTTP to Velo (sequential was ~30+ round-trips × latency). */
+async function promisePool<T>(factories: Array<() => Promise<T>>, batchSize: number): Promise<T[]> {
+  const out: T[] = [];
+  for (let i = 0; i < factories.length; i += batchSize) {
+    const slice = factories.slice(i, i + batchSize).map((fn) => fn());
+    out.push(...(await Promise.all(slice)));
+  }
+  return out;
+}
+
+async function buildChartPayload(symbol: string, hours: number) {
+  const now = Date.now();
+  const begin = now - hours * 3600000;
+
+  const priceTasks: Array<() => Promise<number[][]>> = [];
+  for (let c = begin; c < now; c += PRICE_CHUNK) {
+    const c0 = c;
+    const c1 = Math.min(c + PRICE_CHUNK, now);
+    priceTasks.push(() => fetchVelo(symbol, PRICE_RES, c0, c1));
+  }
+
+  type OiPart = { ex: string; rows: number[][] };
+  const oiTasks: Array<() => Promise<OiPart>> = [];
+  for (const ex of ALL_EXCHANGES) {
+    const oiSym = `${symbol}#${ex}#open_interest#aggregated#USD#Candles`;
+    for (let c = begin; c < now; c += OI_CHUNK) {
+      const c0 = c;
+      const c1 = Math.min(c + OI_CHUNK, now);
+      oiTasks.push(async () => {
+        try {
+          const arr = await fetchVelo(oiSym, OI_RES, c0, c1);
+          return { ex, rows: arr };
+        } catch {
+          return { ex, rows: [] };
+        }
+      });
+    }
+  }
+
+  const [priceChunks, oiParts] = await Promise.all([
+    promisePool(priceTasks, 8),
+    promisePool(oiTasks, 10),
+  ]);
+
+  const priceBars: number[][] = [];
+  for (const arr of priceChunks) priceBars.push(...arr);
+
+  const oiByEx: Record<string, { t: number; o: number; h: number; l: number; c: number }[]> = {};
+  for (const ex of ALL_EXCHANGES) oiByEx[ex] = [];
+
+  for (const { ex, rows } of oiParts) {
+    for (const r of rows)
+      oiByEx[ex].push({ t: r[0], o: r[1], h: r[2], l: r[3], c: r[4] });
+  }
+
+  const bars = priceBars.map((r: number[]) => ({
+    t: r[0] * 1000,
+    o: r[1],
+    h: r[2],
+    l: r[3],
+    c: r[4],
+    v: r[5] ?? 0,
+  }));
+
+  return { bars, oiByEx };
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://localhost:${SERVER_PORT}`);
 
@@ -34,34 +101,9 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === '/api/chart') {
     const symbol = url.searchParams.get('symbol') ?? 'BTCUSDT';
     const hours = Math.min(parseFloat(url.searchParams.get('hours') ?? '34'), 72);
-    const now = Date.now();
-    const begin = now - hours * 3600000;
 
     try {
-      // Price bars (paginated)
-      let priceBars: any[] = [];
-      for (let c = begin; c < now; c += PRICE_CHUNK) {
-        priceBars.push(...await fetchVelo(symbol, PRICE_RES, c, Math.min(c + PRICE_CHUNK, now)));
-      }
-
-      const oiByEx: Record<string, { t: number; o: number; h: number; l: number; c: number }[]> = {};
-      for (const ex of ALL_EXCHANGES) {
-        const points: { t: number; o: number; h: number; l: number; c: number }[] = [];
-        const oiSym = `${symbol}#${ex}#open_interest#aggregated#USD#Candles`;
-        for (let c = begin; c < now; c += OI_CHUNK) {
-          try {
-            const arr = await fetchVelo(oiSym, OI_RES, c, Math.min(c + OI_CHUNK, now));
-            for (const r of arr)
-              points.push({ t: r[0], o: r[1], h: r[2], l: r[3], c: r[4] });
-          } catch {}
-        }
-        oiByEx[ex] = points;
-      }
-
-      // Price bars as compact arrays
-      const bars = priceBars.map((r: number[]) => ({
-        t: r[0] * 1000, o: r[1], h: r[2], l: r[3], c: r[4], v: r[5] ?? 0
-      }));
+      const { bars, oiByEx } = await buildChartPayload(symbol, hours);
 
       res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
       res.end(JSON.stringify({ bars, oiByEx }));
