@@ -1,6 +1,6 @@
 # heatripscreener
 
-Chart + OI screener for **heat.rip** — **Velo** for historical and **live 1m** candles (polled; forming bar = Velo’s current bucket), multi-venue USD OI from Velo, Binance **REST** for ticker list + open interest. **No database**.
+Chart + OI screener for **heat.rip** — **Velo** for historical and **live 1m** candles (polled only while a chart WebSocket client has that symbol subscribed), multi-venue USD OI from Velo, Binance **REST** for tickers + **open interest** (same rule: only symbols currently on screen). **No database**.
 
 ## Run locally
 

@@ -105,8 +105,8 @@ async function refreshTickers() {
 setTimeout(refreshTickers, 3000);
 
 setupWebSocket(server);
-startVeloLivePoller(SYMBOLS);
-startOIPoller(SYMBOLS, TIMEFRAMES, 60000);
+startVeloLivePoller();
+startOIPoller(TIMEFRAMES, 60000);
 
 server.listen(SERVER_PORT, '0.0.0.0', () => {
   console.log(`[heat.rip] listening on :${SERVER_PORT}`);

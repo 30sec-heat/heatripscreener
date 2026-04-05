@@ -1,5 +1,6 @@
 import { fetchVeloRaw } from '../shared/velo.js';
 import type { Bar } from '../shared/types.js';
+import { getActiveChartSymbols } from '../shared/active-subscriptions.js';
 import { barEvents } from './bar-aggregator.js';
 import { updatePrice } from './oi-poller.js';
 
@@ -10,13 +11,19 @@ const BUCKET_MS = 60_000;
 export const VELO_LIVE_POLL_MS = Math.max(2000, Number(process.env.VELO_LIVE_POLL_MS) || 4000);
 const LOOKBACK_MS = 3 * 3600000;
 
-const pollSymbols = new Set<string>();
+const IDLE_MS = 8000;
+
 const lastClosedEmittedTs = new Map<string, number>();
 const initDone = new Map<string, boolean>();
 const formingCache = new Map<string, Bar | null>();
 
-export function ensureVeloLiveSymbols(symbols: Iterable<string>) {
-  for (const s of symbols) pollSymbols.add(s);
+function pruneInactiveState(active: Set<string>) {
+  for (const k of [...lastClosedEmittedTs.keys()])
+    if (!active.has(k)) {
+      lastClosedEmittedTs.delete(k);
+      initDone.delete(k);
+    }
+  for (const k of [...formingCache.keys()]) if (!active.has(k)) formingCache.delete(k);
 }
 
 function rowToBar(symbol: string, row: number[]): Bar {
@@ -93,24 +100,28 @@ export function getVeloLiveFormingBar(symbol: string): Bar | null {
   return formingCache.get(symbol) ?? null;
 }
 
-export function startVeloLivePoller(initial: string[]) {
-  ensureVeloLiveSymbols(initial);
+export function startVeloLivePoller() {
   let running = false;
   async function tick() {
     if (running) return;
     running = true;
+    const active = getActiveChartSymbols();
+    const delay = active.size ? VELO_LIVE_POLL_MS : IDLE_MS;
     try {
-      for (const s of pollSymbols) {
-        try {
-          await pollSymbol(s);
-        } catch {}
-        await new Promise((r) => setTimeout(r, 120));
+      pruneInactiveState(active);
+      if (active.size) {
+        for (const s of active) {
+          try {
+            await pollSymbol(s);
+          } catch {}
+          await new Promise((r) => setTimeout(r, 120));
+        }
       }
     } finally {
       running = false;
     }
-    setTimeout(tick, VELO_LIVE_POLL_MS);
+    setTimeout(tick, delay);
   }
-  console.log(`[velo-live] 1m poller every ${VELO_LIVE_POLL_MS}ms (symbols grow with WS subscribe)`);
+  console.log(`[velo-live] 1m candles only while a chart tab is open (Velo ${VELO_LIVE_POLL_MS}ms when active)`);
   tick();
 }

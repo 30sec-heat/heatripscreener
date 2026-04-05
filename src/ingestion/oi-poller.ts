@@ -1,4 +1,7 @@
+import { getActiveChartSymbols } from '../shared/active-subscriptions.js';
+
 const BINANCE_FAPI = 'https://fapi.binance.com';
+const IDLE_MS = 10_000;
 
 // Shared ban state
 export let bannedUntil = 0;
@@ -64,10 +67,15 @@ export function feedOISample(symbol: string, oiValue: number, ts: number, timefr
   }
 }
 
-export function startOIPoller(symbols: string[], timeframes: number[], intervalMs = 5000) {
+export function startOIPoller(timeframes: number[], intervalMs = 60_000) {
   async function poll() {
     if (isBanned()) {
       setTimeout(poll, Math.min(bannedUntil - Date.now() + 2000, 60000));
+      return;
+    }
+    const symbols = [...getActiveChartSymbols()];
+    if (!symbols.length) {
+      setTimeout(poll, IDLE_MS);
       return;
     }
     const now = Date.now();
@@ -78,14 +86,12 @@ export function startOIPoller(symbols: string[], timeframes: number[], intervalM
         if (checkBanResponse(data)) break;
         if (data.openInterest) {
           const oi = parseFloat(data.openInterest);
-          // Get price to compute USD value
           const price = latestPrice.get(symbol) ?? 0;
           const oiValue = oi * price;
 
           latestOI.set(symbol, oi);
           latestOIValue.set(symbol, oiValue);
 
-          // Feed into OI OHLC bars
           feedOISample(symbol, oiValue, now, timeframes);
         }
       } catch {}
@@ -94,7 +100,7 @@ export function startOIPoller(symbols: string[], timeframes: number[], intervalM
   }
 
   setTimeout(poll, 2000);
-  console.log(`[oi-poller] Polling OI for ${symbols.join(', ')} every ${intervalMs / 1000}s`);
+  console.log(`[oi-poller] Open interest only while a chart tab is open (${intervalMs / 1000}s when active)`);
 }
 
 // Price feed from aggTrade WS for OI USD conversion

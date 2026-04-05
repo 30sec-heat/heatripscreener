@@ -1,7 +1,8 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Server } from 'http';
 import { barEvents, getCurrentBar } from '../ingestion/bar-aggregator.js';
-import { ensureVeloLiveSymbols, getVeloLiveFormingBar } from '../ingestion/velo-live-bars.js';
+import { getVeloLiveFormingBar } from '../ingestion/velo-live-bars.js';
+import { setChartSymbolsGetter } from '../shared/active-subscriptions.js';
 import type { Bar } from '../shared/types.js';
 
 interface ClientState {
@@ -11,21 +12,24 @@ interface ClientState {
 
 const clients = new Map<WebSocket, ClientState>();
 
+setChartSymbolsGetter(() => {
+  const out = new Set<string>();
+  for (const st of clients.values()) for (const s of st.symbols) out.add(s);
+  return out;
+});
+
 export function setupWebSocket(server: Server) {
   const wss = new WebSocketServer({ server });
 
   wss.on('connection', (ws) => {
-    clients.set(ws, { symbols: new Set(['BTCUSDT', 'ETHUSDT', 'SOLUSDT']), timeframes: new Set([15, 60]) });
+    clients.set(ws, { symbols: new Set(), timeframes: new Set([60]) });
 
     ws.on('message', (raw) => {
       try {
         const msg = JSON.parse(raw.toString());
         const state = clients.get(ws);
         if (!state) return;
-        if (msg.subscribe) {
-          state.symbols = new Set(msg.subscribe);
-          ensureVeloLiveSymbols(msg.subscribe);
-        }
+        if (msg.subscribe) state.symbols = new Set(msg.subscribe);
         if (msg.timeframes) state.timeframes = new Set(msg.timeframes);
       } catch {}
     });
