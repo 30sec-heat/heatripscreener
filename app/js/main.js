@@ -47,17 +47,26 @@ function scheduleLiveRedraw() {
 }
 
 function resize() {
-  const r = devicePixelRatio || 1;
-  const rc = cv.parentElement.getBoundingClientRect();
-  W = rc.width;
-  H = rc.height;
-  cv.width = W * r;
-  cv.height = H * r;
-  ctx.setTransform(r, 0, 0, r, 0, 0);
+  const parent = cv.parentElement;
+  if (!parent) return;
+  const rc = parent.getBoundingClientRect();
+  const cssW = Math.max(1, rc.width);
+  const cssH = Math.max(1, rc.height);
+  W = cssW;
+  H = cssH;
+  const dpr = Math.min(4, Math.max(1, window.devicePixelRatio || 1));
+  const bw = Math.max(1, Math.round(cssW * dpr));
+  const bh = Math.max(1, Math.round(cssH * dpr));
+  cv.style.width = `${cssW}px`;
+  cv.style.height = `${cssH}px`;
+  cv.width = bw;
+  cv.height = bh;
+  ctx.setTransform(bw / cssW, 0, 0, bh / cssH, 0, 0);
   scheduleRedraw();
 }
 resize();
 window.addEventListener('resize', resize);
+if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
 
 const THEME_KEY = 'heatrip-theme';
 
