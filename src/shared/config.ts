@@ -1,12 +1,5 @@
 export const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'];
 
-/** When Binance REST fails (e.g. datacenter IP), sidebar still lists these USDT pairs with placeholder stats until a fetch succeeds. */
-export const TICKER_FALLBACK: string[] = [
-  'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'LINKUSDT', 'DOTUSDT',
-  'MATICUSDT', 'LTCUSDT', 'NEARUSDT', 'APTUSDT', 'ATOMUSDT', 'FILUSDT', 'ARBUSDT', 'OPUSDT', 'SUIUSDT', 'WLDUSDT',
-  'INJUSDT', 'TIAUSDT', 'SEIUSDT', 'ORDIUSDT', 'STXUSDT', 'RUNEUSDT',
-];
-
 export const TIMEFRAMES = [1, 5, 15, 60, 300]; // seconds
 
 export const WHALE_THRESHOLDS: Record<string, number> = {

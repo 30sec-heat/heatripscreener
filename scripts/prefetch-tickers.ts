@@ -1,8 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { fetchPerpUsdtTickerRows, slimTickerRow } from '../src/shared/binance-markets.js';
-import { TICKER_FALLBACK } from '../src/shared/config.js';
+import { fetchPerpUsdtTickerRows } from '../src/shared/binance-markets.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_DIR = path.resolve(__dirname, '../app');
@@ -10,15 +9,14 @@ const DATA_DIR = path.resolve(__dirname, '../src/data');
 const OUT_APP = path.join(APP_DIR, 'tickers.json');
 const OUT_TS = path.join(DATA_DIR, 'bundled-tickers.gen.ts');
 
-function synthetic() {
-  return TICKER_FALLBACK.map((symbol) =>
-    slimTickerRow({ symbol, lastPrice: '0', priceChangePercent: '0', quoteVolume: '0' }),
-  );
-}
-
 async function main() {
-  let rows = await fetchPerpUsdtTickerRows();
-  if (!rows || rows.length === 0) rows = synthetic();
+  const rows = await fetchPerpUsdtTickerRows();
+  if (!rows || rows.length === 0) {
+    console.warn(
+      '[prefetch-tickers] Binance fetch failed or empty — leaving existing tickers.json + bundled-tickers.gen.ts unchanged (avoid shipping a short fallback list on CI).',
+    );
+    return;
+  }
   const payload = JSON.stringify(rows);
   fs.mkdirSync(path.dirname(OUT_APP), { recursive: true });
   fs.mkdirSync(path.dirname(OUT_TS), { recursive: true });

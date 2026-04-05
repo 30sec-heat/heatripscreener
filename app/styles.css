@@ -1121,12 +1121,14 @@ canvas {
 
 @media (min-width: 768px) {
   .sidebar-card {
-    height: auto;
+    height: 100%;
     max-height: none;
+    min-height: 0px;
     width: 16rem;
     min-width: 16rem;
     max-width: none;
     flex: none;
+    align-self: stretch;
   }
 }
 

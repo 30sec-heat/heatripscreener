@@ -2,8 +2,8 @@ import http from 'http';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { SERVER_PORT, SYMBOLS, TICKER_FALLBACK, TIMEFRAMES } from '../shared/config.js';
-import { fetchPerpUsdtTickerRows, slimTickerRow } from '../shared/binance-markets.js';
+import { SERVER_PORT, SYMBOLS, TIMEFRAMES } from '../shared/config.js';
+import { fetchPerpUsdtTickerRows } from '../shared/binance-markets.js';
 import { BUNDLED_TICKERS } from '../data/bundled-tickers.gen.js';
 import { setupWebSocket } from './ws-handler.js';
 import { startOIPoller, isBanned, checkBanResponse } from '../ingestion/oi-poller.js';
@@ -102,12 +102,6 @@ async function buildChartPayload(symbol: string, hours: number, perVenueOi: bool
 
 const TICKERS_SNAPSHOT = path.join(APP_DIR, 'tickers.json');
 
-function syntheticTickers(): any[] {
-  return TICKER_FALLBACK.map((symbol) =>
-    slimTickerRow({ symbol, lastPrice: '0', priceChangePercent: '0', quoteVolume: '0' }),
-  );
-}
-
 function readTickerSnapshot(): any[] {
   if (BUNDLED_TICKERS.length > 0) return BUNDLED_TICKERS.map((t) => ({ ...t }));
   try {
@@ -117,7 +111,7 @@ function readTickerSnapshot(): any[] {
   } catch {
     /* missing */
   }
-  return syntheticTickers();
+  return [];
 }
 
 let tickerCache: any[] = readTickerSnapshot();
@@ -143,8 +137,6 @@ async function refreshTickers() {
       }
     }
   }
-
-  if (tickerCache.length === 0) tickerCache = syntheticTickers();
 
   setTimeout(refreshTickers, 60_000);
 }

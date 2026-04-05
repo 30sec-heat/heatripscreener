@@ -1609,7 +1609,11 @@ let tF = '';
 let tSort = 'vol';
 async function fetchT() {
   try {
-    tickers = await (await fetch('/tickers.json')).json();
+    const r = await fetch('/api/tickers', { cache: 'no-store' });
+    if (!r.ok) throw new Error(String(r.status));
+    const j = await r.json();
+    if (!Array.isArray(j)) throw new Error('tickers');
+    tickers = j;
     renT();
   } catch (e) {}
 }
