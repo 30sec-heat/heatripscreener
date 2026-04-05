@@ -1,0 +1,27 @@
+{
+  "name": "heatripscreener",
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build:css": "tailwindcss -i ./app/css/input.css -o ./app/styles.css",
+    "build:css:min": "tailwindcss -i ./app/css/input.css -o ./app/styles.css --minify",
+    "start": "tsx src/server/index.ts",
+    "ingest": "tsx src/ingestion/index.ts",
+    "server": "tsx src/server/index.ts",
+    "setup-db": "psql -f scripts/setup-db.sql"
+  },
+  "dependencies": {
+    "pg": "^8.13.0",
+    "tsx": "^4.19.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.0",
+    "@types/ws": "^8.5.0",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.6.0"
+  }
+}

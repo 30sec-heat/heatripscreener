@@ -1,0 +1,250 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * heat.rip — CSS variables + theme toggle.
+ * Base font 15.6px ≈ prior 13px × 1.2 (20% larger).
+ */
+@layer base {
+  :root {
+    --bg: #101216;
+    --bg-elev: #15181d;
+    --bg-panel: #181b21;
+    --bg-hover: #22262e;
+    --border: #2a3038;
+    --border-light: #363d47;
+    --text: #dde3df;
+    --muted: #8a9394;
+    --faint: #69706f;
+    --accent: #5ed9a8;
+    --accent-glow: rgba(94, 217, 168, 0.26);
+    --accent-soft: rgba(94, 217, 168, 0.08);
+    --green: #12c97f;
+    --red: #e85d6f;
+    --sb-fade: rgba(16, 18, 22, 0.97);
+  }
+
+  html {
+    font-size: 15.6px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  html[data-theme='light'] {
+    --bg: #e8ebef;
+    --bg-elev: #f2f4f7;
+    --bg-panel: #ffffff;
+    --bg-hover: #e4e8ed;
+    --border: #cdd4dd;
+    --border-light: #b8c1cd;
+    --text: #1c2430;
+    --muted: #5c6570;
+    --faint: #7a8490;
+    --accent: #047857;
+    --accent-glow: rgba(4, 120, 87, 0.2);
+    --accent-soft: rgba(4, 120, 87, 0.1);
+    --green: #0d9b5c;
+    --red: #c73e4e;
+    --sb-fade: rgba(255, 255, 255, 0.97);
+  }
+
+  body {
+    @apply m-0 flex h-screen w-full flex-col overflow-hidden bg-surface font-sans text-base text-ink;
+  }
+}
+
+@layer components {
+  .ftx-toolbar {
+    @apply z-20 flex min-h-touch flex-wrap items-center gap-2 border-b border-border bg-panel px-3 py-2 sm:gap-x-2.5 sm:px-3.5 sm:py-2.5 md:min-h-[3.25rem] md:py-2.5 md:pl-4 md:pr-3.5;
+  }
+
+  .ftx-brand {
+    @apply mb-2 flex w-full shrink-0 items-center gap-2 border-b border-border pb-2 sm:mb-0 sm:w-auto sm:gap-2.5 sm:border-b-0 sm:border-r sm:pb-0 sm:pr-3.5 sm:mr-1 md:pr-4;
+  }
+
+  .ftx-mark {
+    @apply h-[1.35rem] w-[3px] shrink-0 rounded-[1px] bg-accent shadow-accentglow;
+  }
+
+  .ftx-logo {
+    @apply text-lg font-bold tracking-tight text-ink sm:text-xl;
+  }
+
+  .ftx-tag {
+    @apply text-xs font-semibold uppercase tracking-wider text-faint sm:text-sm;
+  }
+
+  .pair {
+    @apply ml-1 rounded-shell border border-[color-mix(in_srgb,var(--accent)_28%,transparent)] bg-accent-soft px-2 py-1 font-mono text-sm font-medium tracking-wide text-accent sm:px-2.5 sm:py-1 sm:text-base;
+  }
+
+  html[data-theme='light'] .pair {
+    border-color: rgba(4, 120, 87, 0.35);
+  }
+
+  .tf-badge {
+    @apply rounded-shell border border-border bg-surface px-2 py-1.5 font-mono text-xs font-medium text-muted sm:px-2.5 sm:text-sm;
+  }
+
+  .field-label {
+    @apply -mr-0.5 text-[0.65rem] font-semibold uppercase tracking-widest text-faint sm:text-xs;
+  }
+
+  .layers-dd {
+    @apply relative inline-block;
+  }
+
+  .layers-dd > summary.layers-sum {
+    list-style: none;
+    user-select: none;
+  }
+
+  .layers-dd > summary.layers-sum::-webkit-details-marker {
+    display: none;
+  }
+
+  .layers-panel {
+    @apply absolute left-0 top-[calc(100%+4px)] z-[100] w-[calc(100vw-1.25rem)] max-w-[17rem] rounded-shell border border-border-light bg-panel p-2.5 shadow-panel sm:w-auto sm:min-w-[15.5rem];
+  }
+
+  html[data-theme='light'] .layers-panel {
+    @apply shadow-panel-light;
+  }
+
+  .layer-opt {
+    @apply flex cursor-pointer items-center gap-2.5 rounded-sm px-1 py-2 font-mono text-sm text-ink sm:gap-2.5 sm:py-1.5 sm:text-base;
+  }
+
+  .layer-opt:hover {
+    @apply bg-hover;
+  }
+
+  .layer-opt input {
+    @apply h-4 w-4 shrink-0 accent-accent;
+  }
+
+  .segmented {
+    @apply inline-flex max-w-full overflow-x-auto rounded-shell border border-border bg-surface;
+  }
+
+  .seg-btn {
+    @apply cursor-pointer whitespace-nowrap border-0 border-r border-border bg-transparent px-2.5 py-2 font-mono text-sm font-medium text-muted transition-colors last:border-r-0 sm:px-3 sm:py-1.5 sm:text-base;
+  }
+
+  .seg-btn:hover {
+    @apply bg-hover text-ink;
+  }
+
+  .seg-btn.on,
+  .seg-btn.active {
+    @apply bg-accent-soft font-semibold text-accent shadow-[inset_0_-2px_0_var(--accent)];
+  }
+
+  .seg-btn.ico {
+    @apply px-3 text-lg leading-none sm:text-xl;
+  }
+
+  .spacer {
+    @apply hidden min-w-px sm:block sm:flex-1;
+  }
+
+  .status-pill {
+    @apply w-full rounded-shell border border-border bg-surface px-2.5 py-2 text-center font-mono text-sm text-muted sm:w-auto sm:px-3 sm:py-1.5 sm:text-left;
+  }
+
+  .status-pill.live {
+    color: var(--green);
+    border-color: color-mix(in srgb, var(--green) 40%, transparent);
+    background: color-mix(in srgb, var(--green) 8%, transparent);
+  }
+
+  .status-pill.status-err {
+    color: var(--red);
+    border-color: color-mix(in srgb, var(--red) 45%, transparent);
+    background: color-mix(in srgb, var(--red) 8%, transparent);
+  }
+
+  #main {
+    @apply flex min-h-0 flex-1 flex-col gap-px bg-border md:flex-row;
+  }
+
+  .chart-card {
+    @apply flex min-h-[min(58vh,28rem)] min-w-0 flex-1 flex-col overflow-hidden bg-panel md:min-h-0;
+  }
+
+  #cw {
+    @apply relative min-h-0 flex-1 bg-panel;
+  }
+
+  .chart-copy-btn {
+    @apply absolute right-2.5 top-2 z-[6] flex h-10 w-10 items-center justify-center rounded-shell border border-border-light bg-[color-mix(in_srgb,var(--bg-panel)_94%,transparent)] p-0 text-muted transition-colors active:scale-[0.96] sm:right-3 sm:top-2.5 sm:h-11 sm:w-11;
+  }
+
+  .chart-copy-btn:hover {
+    @apply border-[color-mix(in_srgb,var(--accent)_38%,var(--border-light))] bg-hover text-accent;
+  }
+
+  canvas {
+    @apply block h-full w-full;
+  }
+
+  #sbw {
+    @apply absolute bottom-0 left-10 right-[4.5rem] z-[3] h-2.5 border-t border-border sm:left-12 sm:right-[5.25rem];
+    background: linear-gradient(to top, var(--sb-fade), transparent);
+  }
+
+  #sbt {
+    @apply absolute top-0.5 z-[1] h-1.5 min-w-[1.4rem] cursor-grab rounded-[1px] bg-accent opacity-90 shadow-sbthumb hover:opacity-100;
+  }
+
+  .sidebar-card {
+    @apply flex max-h-[42vh] min-h-0 w-full shrink-0 flex-col overflow-hidden bg-panel md:max-h-none md:h-auto md:w-56 md:max-w-none md:flex-none lg:w-60;
+  }
+
+  .mkt-ts {
+    @apply flex flex-wrap items-stretch gap-2 border-b border-border bg-elev px-2 py-1.5 sm:px-2.5 sm:py-2;
+  }
+
+  .mkt-ts input {
+    @apply min-w-[7rem] flex-1 rounded-shell border border-border bg-surface px-2 py-2 font-mono text-sm text-ink outline-none placeholder:text-faint focus:border-accent focus:shadow-[0_0_0_1px_var(--accent-glow)] sm:min-w-0 sm:px-3 sm:text-base;
+  }
+
+  .mkt-ts .segmented {
+    @apply self-center;
+  }
+
+  #tl {
+    @apply min-h-0 flex-1 overflow-y-auto bg-panel;
+  }
+
+  #tl::-webkit-scrollbar {
+    width: 4px;
+  }
+  #tl::-webkit-scrollbar-thumb {
+    @apply rounded-sm bg-border-light;
+  }
+
+  .ti-row {
+    @apply flex cursor-pointer items-center gap-2 border-b border-[color-mix(in_srgb,var(--border)_85%,transparent)] px-2 py-1.5 transition-colors sm:gap-2.5 sm:px-2.5 sm:py-1.5;
+  }
+
+  .ti-row:hover {
+    @apply bg-hover;
+  }
+
+  .ti-row.active {
+    @apply bg-accent-soft shadow-[inset_2px_0_0_var(--accent)];
+  }
+
+  .ti-row .ti-sym {
+    @apply min-w-0 flex-1 truncate text-sm font-semibold tracking-tight text-ink sm:text-base;
+  }
+
+  .ti-row .ti-price {
+    @apply w-[5.25rem] min-w-[5.25rem] shrink-0 text-right font-mono text-xs tabular-nums leading-none text-muted sm:w-[5.75rem] sm:min-w-[5.75rem] sm:text-sm;
+  }
+
+  .ti-row .ti-ch {
+    @apply w-[3.25rem] min-w-[3.25rem] shrink-0 text-right font-mono text-xs font-semibold tabular-nums leading-none sm:w-[3.5rem] sm:min-w-[3.5rem] sm:text-sm;
+  }
+}
