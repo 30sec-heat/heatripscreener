@@ -16,62 +16,33 @@ const MIME: Record<string, string> = {
   '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml',
 };
 
-// 1m price + 1m OI (Velo)
+// 1m price + 1m OI (Velo). One range call returns full granular candles; higher TFs re-aggregated in the client.
 const PRICE_RES = 1;
 const OI_RES = 1;
-const PRICE_CHUNK = 7 * 3600000;
-const OI_CHUNK = 7 * 3600000;
 
 async function fetchVelo(symbol: string, res: number, begin: number, end: number) {
   return fetchVeloRaw(symbol, res, begin, end);
-}
-
-/** Bounded parallel HTTP to Velo (sequential was ~30+ round-trips × latency). */
-async function promisePool<T>(factories: Array<() => Promise<T>>, batchSize: number): Promise<T[]> {
-  const out: T[] = [];
-  for (let i = 0; i < factories.length; i += batchSize) {
-    const slice = factories.slice(i, i + batchSize).map((fn) => fn());
-    out.push(...(await Promise.all(slice)));
-  }
-  return out;
 }
 
 async function buildChartPayload(symbol: string, hours: number) {
   const now = Date.now();
   const begin = now - hours * 3600000;
 
-  const priceTasks: Array<() => Promise<number[][]>> = [];
-  for (let c = begin; c < now; c += PRICE_CHUNK) {
-    const c0 = c;
-    const c1 = Math.min(c + PRICE_CHUNK, now);
-    priceTasks.push(() => fetchVelo(symbol, PRICE_RES, c0, c1));
-  }
-
-  type OiPart = { ex: string; rows: number[][] };
-  const oiTasks: Array<() => Promise<OiPart>> = [];
-  for (const ex of ALL_EXCHANGES) {
-    const oiSym = `${symbol}#${ex}#open_interest#aggregated#USD#Candles`;
-    for (let c = begin; c < now; c += OI_CHUNK) {
-      const c0 = c;
-      const c1 = Math.min(c + OI_CHUNK, now);
-      oiTasks.push(async () => {
-        try {
-          const arr = await fetchVelo(oiSym, OI_RES, c0, c1);
-          return { ex, rows: arr };
-        } catch {
-          return { ex, rows: [] };
-        }
-      });
-    }
-  }
-
-  const [priceChunks, oiParts] = await Promise.all([
-    promisePool(priceTasks, 8),
-    promisePool(oiTasks, 10),
+  /** 1× OHLC (binance-futures per velo.ts) + 1× USD OI candles per venue — parallel. */
+  const [priceArr, ...oiParts] = await Promise.all([
+    fetchVelo(symbol, PRICE_RES, begin, now),
+    ...ALL_EXCHANGES.map(async (ex) => {
+      const oiSym = `${symbol}#${ex}#open_interest#aggregated#USD#Candles`;
+      try {
+        const rows = await fetchVelo(oiSym, OI_RES, begin, now);
+        return { ex, rows } as const;
+      } catch {
+        return { ex, rows: [] as number[][] } as const;
+      }
+    }),
   ]);
 
-  const priceBars: number[][] = [];
-  for (const arr of priceChunks) priceBars.push(...arr);
+  const priceBars = [...priceArr].sort((a, b) => a[0] - b[0]);
 
   const oiByEx: Record<string, { t: number; o: number; h: number; l: number; c: number }[]> = {};
   for (const ex of ALL_EXCHANGES) oiByEx[ex] = [];
