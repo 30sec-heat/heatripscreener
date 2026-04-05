@@ -18,7 +18,7 @@ function forwardFillOiBars(rows) {
 /**
  * Map 1m OI OHLC onto 1m price bars. Server uses Velo `...#open_interest#aggregated#USD#Candles`
  * — values are already OI in USD; do **not** multiply by price (that couples ΔOI to price moves and
- * keeps quadrant pChg×oiDelta meaningful when OI USD is flat).
+ * so pChg×oiDelta stays meaningful when OI USD is flat).
  * Per-venue rows are forward-filled, then summed to agg.
  */
 export function computeOIForSlice(shown, oiRaw, exOn) {
