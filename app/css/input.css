@@ -250,27 +250,107 @@
   }
 
   .mirrorly-tip {
-    @apply pointer-events-auto fixed z-[200] max-w-[18rem] rounded-lg border border-border bg-panel px-3 py-2.5 text-sm shadow-lg;
-    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+    @apply pointer-events-auto fixed z-[200] max-w-[21.5rem] min-w-[16.5rem] border-0 bg-transparent p-0 shadow-none;
+    font-size: 0.8125rem;
   }
 
-  .mirrorly-tip-title {
-    @apply font-semibold leading-tight text-ink;
+  .mirrorly-tip-card {
+    @apply overflow-hidden rounded-xl border border-border;
+    background: color-mix(in srgb, var(--bg-panel) 96%, var(--accent) 4%);
+    box-shadow:
+      0 16px 48px rgba(0, 0, 0, 0.4),
+      0 0 0 1px rgba(255, 255, 255, 0.045) inset;
   }
 
-  .mirrorly-tip-kind {
-    @apply mt-0.5 text-[0.65rem] font-medium uppercase tracking-wide text-faint;
+  html[data-theme='light'] .mirrorly-tip-card {
+    box-shadow:
+      0 12px 36px rgba(15, 25, 35, 0.12),
+      0 0 0 1px rgba(0, 0, 0, 0.06) inset;
   }
 
-  .mirrorly-tip-meta {
-    @apply mt-1.5 font-mono text-[0.7rem] leading-snug text-muted;
+  .mirrorly-tip-head {
+    @apply flex items-start gap-3 px-3.5 pt-3.5 pb-2;
+  }
+
+  .mirrorly-tip-exicon {
+    @apply flex h-12 w-12 shrink-0 items-center justify-center rounded-xl font-mono text-[0.76rem] font-extrabold leading-none tracking-tight;
+    box-shadow:
+      0 0 0 2px color-mix(in srgb, var(--mirrorly-ring, var(--border)) 55%, transparent),
+      0 4px 12px rgba(0, 0, 0, 0.18);
+  }
+
+  .mirrorly-tip-headtext {
+    @apply min-w-0 flex-1 pt-0.5;
+  }
+
+  .mirrorly-tip-name {
+    @apply truncate text-[0.95rem] font-semibold leading-tight text-ink;
+  }
+
+  .mirrorly-tip-exchange {
+    @apply mt-0.5 truncate font-mono text-[0.68rem] text-muted;
+  }
+
+  .mirrorly-tip-side {
+    @apply shrink-0 rounded-md px-2 py-1 text-[0.62rem] font-bold uppercase tracking-wider;
+  }
+
+  .mirrorly-tip-side-long {
+    background: color-mix(in srgb, var(--green) 22%, transparent);
+    color: var(--green);
+  }
+
+  .mirrorly-tip-side-short {
+    background: color-mix(in srgb, var(--red) 22%, transparent);
+    color: var(--red);
+  }
+
+  .mirrorly-tip-mark {
+    @apply mx-3.5 mb-2 inline-flex rounded-md px-2 py-0.5 font-mono text-[0.62rem] font-medium text-faint;
+    background: color-mix(in srgb, var(--border) 35%, transparent);
+  }
+
+  .mirrorly-tip-stats {
+    @apply mx-3.5 mb-3 grid gap-y-1.5 border-t border-border pt-3;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .mirrorly-tip-stats dt {
+    @apply font-mono text-[0.65rem] font-medium text-faint;
+  }
+
+  .mirrorly-tip-stats dd {
+    @apply text-right font-mono text-[0.72rem] font-semibold tabular-nums text-ink;
   }
 
   .mirrorly-tip-pnl {
-    @apply mt-1 font-mono text-[0.75rem] font-medium text-ink;
+    @apply mx-3.5 flex items-center justify-between gap-3 rounded-lg px-3 py-2.5;
+    background: color-mix(in srgb, var(--bg-hover) 75%, transparent);
+  }
+
+  .mirrorly-tip-pnl-pos .mirrorly-tip-pnl-val {
+    color: var(--green);
+  }
+
+  .mirrorly-tip-pnl-neg .mirrorly-tip-pnl-val {
+    color: var(--red);
+  }
+
+  .mirrorly-tip-pnl-label {
+    @apply text-[0.62rem] font-semibold uppercase tracking-wide text-muted;
+  }
+
+  .mirrorly-tip-pnl-val {
+    @apply font-mono text-[0.88rem] font-bold tabular-nums text-ink;
   }
 
   .mirrorly-tip-link {
-    @apply mt-2 inline-block text-sm font-medium text-accent underline-offset-2 hover:underline;
+    @apply mx-3.5 mb-3.5 mt-0 block rounded-lg py-2 text-center text-[0.8rem] font-semibold no-underline transition-colors;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+
+  .mirrorly-tip-link:hover {
+    background: color-mix(in srgb, var(--accent) 20%, transparent);
   }
 }

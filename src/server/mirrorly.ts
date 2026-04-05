@@ -38,6 +38,10 @@ export type MirrorlyPosition = {
   entryPrice: number;
   /** USD notional from feed/detail; used to merge multiple open legs into weighted avg entry. */
   positionSize: number;
+  /** First fill price (open event); avg may differ after scales. */
+  firstEntryPrice: number | null;
+  /** Last exit trade price when closed. */
+  exitPrice: number | null;
   name: string;
   openedMs: number;
   closedMs: number | null;
@@ -72,6 +76,25 @@ function parseMirrorTime(iso: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+function firstAndExitFromDetail(doc: Record<string, unknown>): {
+  firstPrice: number | null;
+  exitPrice: number | null;
+} {
+  const ex = doc.executions as { price?: unknown; increase?: boolean }[] | undefined;
+  if (!Array.isArray(ex) || ex.length === 0) return { firstPrice: null, exitPrice: null };
+  const f = Number(ex[0]?.price);
+  const firstPrice = Number.isFinite(f) && f > 0 ? f : null;
+  let exitPrice: number | null = null;
+  for (let i = ex.length - 1; i >= 0; i--) {
+    if (ex[i]?.increase === false) {
+      const p = Number(ex[i]?.price);
+      if (Number.isFinite(p) && p > 0) exitPrice = p;
+      break;
+    }
+  }
+  return { firstPrice, exitPrice };
+}
+
 const store = new Map<string, MirrorlyPosition>();
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let reconcileTimer: ReturnType<typeof setTimeout> | null = null;
@@ -91,6 +114,9 @@ function loadDisk() {
             unrealizedPnl: p.unrealizedPnl ?? null,
             realizedPnl: p.realizedPnl ?? null,
             positionSize: typeof p.positionSize === 'number' && p.positionSize >= 0 ? p.positionSize : 0,
+            firstEntryPrice:
+              p.firstEntryPrice != null && Number.isFinite(p.firstEntryPrice) ? p.firstEntryPrice : null,
+            exitPrice: p.exitPrice != null && Number.isFinite(p.exitPrice) ? p.exitPrice : null,
           });
         }
       }
@@ -153,12 +179,16 @@ function applyFeed(obj: Record<string, unknown>) {
     const openedMs = prev?.openedMs ?? t;
     const realizedPnl =
       Number.isFinite(nr) ? nr : Number.isFinite(ntp) ? ntp : prev?.realizedPnl ?? null;
+    const tp = Number(obj.tradePrice);
+    const exitPrice = Number.isFinite(tp) && tp > 0 ? tp : prev?.exitPrice ?? null;
     const row: MirrorlyPosition = {
       positionId,
       symbol: symbol || prev?.symbol || '',
       side: prev?.side ?? side,
       entryPrice: entryPrice || prev?.entryPrice || 0,
       positionSize: legSize || prev?.positionSize || 0,
+      firstEntryPrice: prev?.firstEntryPrice ?? null,
+      exitPrice,
       name: name || prev?.name || '',
       openedMs: prev?.openedMs ?? openedMs,
       closedMs: t,
@@ -179,6 +209,13 @@ function applyFeed(obj: Record<string, unknown>) {
   let openedMs = prev?.openedMs ?? 0;
   if (type === 'open' || !openedMs) openedMs = t;
 
+  let firstEntryPrice = prev?.firstEntryPrice ?? null;
+  if (type === 'open') {
+    const tp = Number(obj.tradePrice);
+    firstEntryPrice =
+      Number.isFinite(tp) && tp > 0 ? tp : entryPrice > 0 ? entryPrice : firstEntryPrice;
+  } else if (firstEntryPrice == null && entryPrice > 0) firstEntryPrice = entryPrice;
+
   const unrealizedPnl = Number.isFinite(nu) ? nu : prev?.unrealizedPnl ?? null;
 
   const row: MirrorlyPosition = {
@@ -187,6 +224,8 @@ function applyFeed(obj: Record<string, unknown>) {
     side,
     entryPrice: entryPrice || prev?.entryPrice || 0,
     positionSize: legSize || prev?.positionSize || 0,
+    firstEntryPrice,
+    exitPrice: null,
     name: name || prev?.name || '',
     openedMs,
     closedMs: null,
@@ -234,12 +273,15 @@ async function reconcileOnce() {
           !isClosed && Number.isFinite(nDocSz) && nDocSz > 0
             ? nDocSz
             : prev?.positionSize ?? 0;
+        const { firstPrice, exitPrice: exExit } = firstAndExitFromDetail(doc);
         const row: MirrorlyPosition = {
           positionId: id,
           symbol: String(doc.symbol ?? prev?.symbol ?? ''),
           side,
           entryPrice: Number(doc.positionEntryPrice ?? prev?.entryPrice ?? 0) || 0,
           positionSize: docSize,
+          firstEntryPrice: firstPrice ?? prev?.firstEntryPrice ?? null,
+          exitPrice: isClosed ? exExit ?? prev?.exitPrice ?? null : null,
           name: String(doc.name ?? prev?.name ?? ''),
           openedMs: openedMs || prev?.openedMs || Date.now(),
           closedMs: closedMs ?? prev?.closedMs ?? null,
@@ -349,12 +391,17 @@ function mergeOpenMirrorlyGroup(rows: MirrorlyPosition[]): MirrorlyPosition {
   const openedMs = Math.min(...sorted.map((r) => r.openedMs));
   const lastSeenMs = Math.max(...sorted.map((r) => r.lastSeenMs));
   const totalSz = sorted.reduce((s, r) => s + (r.positionSize > 0 ? r.positionSize : 0), 0);
+  const earliest = sorted[0];
+  const firstEntryPrice =
+    earliest.firstEntryPrice ?? (earliest.entryPrice > 0 ? earliest.entryPrice : null);
   return {
     positionId: sorted.map((r) => r.positionId).join(','),
     symbol: anchor.symbol,
     side: anchor.side,
     entryPrice,
     positionSize: totalSz || anchor.positionSize,
+    firstEntryPrice,
+    exitPrice: null,
     name: anchor.name,
     openedMs,
     closedMs: null,

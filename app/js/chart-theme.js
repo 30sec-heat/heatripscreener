@@ -53,6 +53,9 @@ const chartThemeDark = {
   mirrorlyBadgeBgExit: 'rgba(28, 34, 42, 0.72)',
   mirrorlyBadgeBorder: 'rgba(230, 237, 232, 0.2)',
   mirrorlyBadgeText: '#c5cfc8',
+  mirrorlyIconFallbackBg: '#2a323c',
+  mirrorlyIconFallbackFg: '#d1d9d3',
+  mirrorlyIconFallbackRing: 'rgba(180, 190, 200, 0.45)',
 };
 
 const chartThemeLight = {
@@ -108,6 +111,9 @@ const chartThemeLight = {
   mirrorlyBadgeBgExit: 'rgba(255, 255, 255, 0.78)',
   mirrorlyBadgeBorder: 'rgba(15, 25, 35, 0.18)',
   mirrorlyBadgeText: '#2a3440',
+  mirrorlyIconFallbackBg: '#eef1f4',
+  mirrorlyIconFallbackFg: '#1e293b',
+  mirrorlyIconFallbackRing: 'rgba(30, 41, 59, 0.35)',
 };
 
 export let chartTheme = chartThemeDark;

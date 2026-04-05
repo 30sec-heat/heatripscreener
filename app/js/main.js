@@ -372,43 +372,50 @@ function mirrorlyPriceAtTime(shown, tMs) {
   return shown[shown.length - 1].c;
 }
 
-function mirrorlyBadgePath(ctx, cx, cy, rw, rh, rad) {
-  const x = cx - rw / 2;
-  const y = cy - rh / 2;
-  const r = Math.min(rad, rw / 2, rh / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + rw - r, y);
-  ctx.quadraticCurveTo(x + rw, y, x + rw, y + r);
-  ctx.lineTo(x + rw, y + rh - r);
-  ctx.quadraticCurveTo(x + rw, y + rh, x + rw - r, y + rh);
-  ctx.lineTo(x + r, y + rh);
-  ctx.quadraticCurveTo(x, y + rh, x, y + rh - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y, x + r, y);
-  ctx.closePath();
+function mirrorlyExchangeBrand(ref) {
+  const k = String(ref || '')
+    .replace(/\s+/g, '')
+    .toLowerCase();
+  const map = {
+    hyperliquid: { bg: '#152028', fg: '#5eead4', ring: '#34d399' },
+    bybit: { bg: '#26150c', fg: '#ffb020', ring: '#ff8a3d' },
+    binance: { bg: '#221c08', fg: '#f0b90b', ring: '#e8c547' },
+    okx: { bg: '#10161c', fg: '#e8eaed', ring: '#ffffff' },
+    deribit: { bg: '#1a1530', fg: '#c4b5fd', ring: '#a78bfa' },
+    bitget: { bg: '#140f22', fg: '#22d3ee', ring: '#06b6d4' },
+    blofin: { bg: '#121820', fg: '#93c5fd', ring: '#60a5fa' },
+  };
+  const label = mirrorlyExAbbrev(ref);
+  if (map[k]) return { ...map[k], label };
+  return {
+    bg: chartTheme.mirrorlyIconFallbackBg,
+    fg: chartTheme.mirrorlyIconFallbackFg,
+    ring: chartTheme.mirrorlyIconFallbackRing,
+    label,
+  };
 }
 
-function drawMirrorlyMarkerBadge(ctx, cx, cy, label, fill, stroke, exitStroke) {
-  ctx.font = "700 8px 'IBM Plex Mono',monospace";
-  const rw = Math.max(24, 10 + ctx.measureText(label).width);
-  const rh = 14;
-  mirrorlyBadgePath(ctx, cx, cy, rw, rh, 3);
-  ctx.fillStyle = fill;
-  ctx.fill();
-  if (stroke) {
-    ctx.strokeStyle = stroke;
-    ctx.lineWidth = 1;
-    if (exitStroke) {
-      ctx.setLineDash([2, 2]);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    } else ctx.stroke();
-  }
-  ctx.fillStyle = chartTheme.mirrorlyBadgeText;
+/** ~48px exchange disc + side ring; hit test uses generous radius. */
+function drawMirrorlyExchangeDisc(ctx, cx, cy, exchangeRef, sideTint, isExit) {
+  const R = 24;
+  const brand = mirrorlyExchangeBrand(exchangeRef);
+  const ringCol = isExit ? chartTheme.mirrorlyExit : sideTint || brand.ring;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(label, cx, cy);
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, Math.PI * 2);
+  ctx.fillStyle = brand.bg;
+  ctx.fill();
+  ctx.strokeStyle = ringCol;
+  ctx.lineWidth = isExit ? 2.5 : 3.25;
+  if (isExit) {
+    ctx.setLineDash([4, 3]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  } else ctx.stroke();
+  ctx.fillStyle = brand.fg;
+  ctx.font = "800 14px 'IBM Plex Mono', monospace";
+  ctx.fillText(brand.label, cx, cy + 0.5);
 }
 
 function mirrorlySidJit(key, salt) {
@@ -419,7 +426,7 @@ function mirrorlySidJit(key, salt) {
 }
 
 function pickMirrorlyHit(mx, my) {
-  const rad = 18;
+  const rad = 40;
   let best = null;
   let bestD = rad;
   for (const h of mirrorlyHits) {
@@ -436,42 +443,117 @@ function mirrorlyTipEl() {
   return document.getElementById('mirrorly-tip');
 }
 
+function mirrorlyFmtUsd(n) {
+  const x = Number(n);
+  if (n == null || !Number.isFinite(x) || x <= 0) return '—';
+  if (x >= 1e9) return '$' + (x / 1e9).toFixed(2) + 'B';
+  if (x >= 1e6) return '$' + (x / 1e6).toFixed(2) + 'M';
+  if (x >= 1e5) return '$' + (x / 1e3).toFixed(0) + 'K';
+  if (x >= 1e3) return '$' + (x / 1e3).toFixed(1) + 'K';
+  return '$' + x.toFixed(0);
+}
+
 function showMirrorlyTip(row, kind, clientX, clientY) {
   const tip = mirrorlyTipEl();
   if (!tip) return;
   tip.hidden = false;
   tip.replaceChildren();
-  const t1 = document.createElement('div');
-  t1.className = 'mirrorly-tip-title';
-  t1.textContent = row.name || 'Trader';
-  const tk = document.createElement('div');
-  tk.className = 'mirrorly-tip-kind';
-  tk.textContent = kind === 'exit' ? 'Exit' : 'Entry';
-  const t2 = document.createElement('div');
-  t2.className = 'mirrorly-tip-meta';
-  const ab = mirrorlyExAbbrev(row.exchangeRef);
-  t2.textContent = `${ab} · ${row.exchangeRef || '—'} · ${row.side} ${row.symbol || ''}`;
-  const t3 = document.createElement('div');
-  t3.className = 'mirrorly-tip-pnl';
+  const notional = row.notionalUsd ?? row.positionSize;
+  const brand = mirrorlyExchangeBrand(row.exchangeRef);
+
+  const card = document.createElement('div');
+  card.className = 'mirrorly-tip-card';
+
+  const head = document.createElement('div');
+  head.className = 'mirrorly-tip-head';
+  const icon = document.createElement('div');
+  icon.className = 'mirrorly-tip-exicon';
+  icon.textContent = mirrorlyExAbbrev(row.exchangeRef);
+  icon.style.background = brand.bg;
+  icon.style.color = brand.fg;
+  icon.style.setProperty('--mirrorly-ring', brand.ring);
+
+  const headText = document.createElement('div');
+  headText.className = 'mirrorly-tip-headtext';
+  const nameEl = document.createElement('div');
+  nameEl.className = 'mirrorly-tip-name';
+  nameEl.textContent = row.name || 'Trader';
+  const exEl = document.createElement('div');
+  exEl.className = 'mirrorly-tip-exchange';
+  exEl.textContent = row.exchangeRef ? `${row.exchangeRef} · ${row.symbol || ''}` : row.symbol || '';
+  headText.append(nameEl, exEl);
+
+  const sidePill = document.createElement('span');
+  const short = row.side === 'short';
+  sidePill.className = 'mirrorly-tip-side ' + (short ? 'mirrorly-tip-side-short' : 'mirrorly-tip-side-long');
+  sidePill.textContent = short ? 'Short' : 'Long';
+  head.append(icon, headText, sidePill);
+
+  const mark = document.createElement('div');
+  mark.className = 'mirrorly-tip-mark';
+  mark.textContent = kind === 'exit' ? 'Exit marker' : 'Entry marker';
+
+  const stats = document.createElement('dl');
+  stats.className = 'mirrorly-tip-stats';
+
+  const addStat = (label, value) => {
+    const dt = document.createElement('dt');
+    dt.textContent = label;
+    const dd = document.createElement('dd');
+    dd.textContent = value;
+    stats.append(dt, dd);
+  };
+
+  const firstPx =
+    row.firstEntryPrice != null && Number.isFinite(Number(row.firstEntryPrice))
+      ? Number(row.firstEntryPrice)
+      : null;
+  const avgPx = row.entryPrice > 0 ? row.entryPrice : null;
+  if (firstPx != null && avgPx != null && Math.abs(firstPx - avgPx) > avgPx * 1e-6) {
+    addStat('First fill', fP(firstPx));
+    addStat('Avg entry', fP(avgPx));
+  } else if (avgPx != null) {
+    addStat('Avg entry', fP(avgPx));
+  } else if (firstPx != null) {
+    addStat('Entry', fP(firstPx));
+  }
+
+  if (kind === 'exit') {
+    const exP = row.exitPrice != null && Number.isFinite(Number(row.exitPrice)) ? Number(row.exitPrice) : null;
+    if (exP != null) addStat('Exit price', fP(exP));
+  }
+
+  addStat('Notional (USD)', mirrorlyFmtUsd(notional));
+
   const open = !row.closed;
   const pnlN = open ? row.unrealizedPnl : row.realizedPnl;
   const pnlOk = pnlN != null && Number.isFinite(Number(pnlN));
-  t3.textContent = open
-    ? `Open uPnL: ${pnlOk ? fSignedN(Number(pnlN)) : '—'}`
-    : `Realized PnL: ${pnlOk ? fSignedN(Number(pnlN)) : '—'}`;
+  const pnlRow = document.createElement('div');
+  pnlRow.className = 'mirrorly-tip-pnl ' + (pnlOk && Number(pnlN) > 0 ? 'mirrorly-tip-pnl-pos' : pnlOk && Number(pnlN) < 0 ? 'mirrorly-tip-pnl-neg' : '');
+  const pnlLab = document.createElement('span');
+  pnlLab.className = 'mirrorly-tip-pnl-label';
+  pnlLab.textContent = open ? 'Open uPnL' : 'Realized PnL';
+  const pnlVal = document.createElement('span');
+  pnlVal.className = 'mirrorly-tip-pnl-val';
+  pnlVal.textContent = pnlOk ? fSignedN(Number(pnlN)) : '—';
+  pnlRow.append(pnlLab, pnlVal);
+
   const a = document.createElement('a');
   a.className = 'mirrorly-tip-link';
   a.href = row.profileUrl || 'https://portal.mirrorly.xyz/';
   a.target = '_blank';
   a.rel = 'noopener noreferrer';
-  a.textContent = 'Open Mirrorly profile →';
-  tip.append(t1, tk, t2, t3, a);
-  const pad = 10;
-  const tw = 288;
-  let left = clientX + 14;
-  let top = clientY + 14;
+  a.textContent = 'Mirrorly profile';
+
+  card.append(head, mark, stats, pnlRow, a);
+  tip.appendChild(card);
+
+  const pad = 12;
+  const tw = 340;
+  let left = clientX + 16;
+  let top = clientY + 16;
   left = Math.max(pad, Math.min(left, window.innerWidth - tw - pad));
-  top = Math.max(pad, Math.min(top, window.innerHeight - 220));
+  top = Math.max(pad, Math.min(top, window.innerHeight - 280));
   tip.style.left = `${left}px`;
   tip.style.top = `${top}px`;
 }
@@ -1411,9 +1493,8 @@ function draw() {
     mirrorlyHits.length = 0;
     const cw = (xRight - pL) / Math.max(1, v);
     const xFor = (tMs) => mirrorlyXAt(shown, tMs, toX, cw);
-    const yClamp = (y) => Math.max(pT + 11, Math.min(pT + priceOhlcH - 11, y));
+    const yClamp = (y) => Math.max(pT + 26, Math.min(pT + priceOhlcH - 26, y));
     for (const row of mirrorlyRows) {
-      const exLab = mirrorlyExAbbrev(row.exchangeRef);
       const sideTint = row.side === 'short' ? chartTheme.mirrorlyShort : chartTheme.mirrorlyLong;
       const openMs = Date.parse(row.opened);
       if (Number.isNaN(openMs)) continue;
@@ -1429,15 +1510,7 @@ function draw() {
       ctx.lineTo(xO, yClamp(yPriceE));
       ctx.stroke();
       ctx.globalAlpha = 1;
-      drawMirrorlyMarkerBadge(
-        ctx,
-        xO,
-        yE,
-        exLab,
-        chartTheme.mirrorlyBadgeBg,
-        sideTint,
-        false,
-      );
+      drawMirrorlyExchangeDisc(ctx, xO, yE, row.exchangeRef, sideTint, false);
       mirrorlyHits.push({ cx: xO, cy: yE, row, kind: 'entry' });
 
       if (row.closed) {
@@ -1448,7 +1521,7 @@ function draw() {
             const pxC = mirrorlyPriceAtTime(shown, closeMs);
             const yPriceX = pxC != null ? toY(pxC) : yPriceE;
             let yX = yClamp(yPriceX + mirrorlySidJit(row.positionId, 'ex'));
-            if (Math.abs(xO - xC) < 22 && Math.abs(yE - yX) < 10) yX = yClamp(yX + 14);
+            if (Math.abs(xO - xC) < 30 && Math.abs(yE - yX) < 14) yX = yClamp(yX + 18);
             ctx.strokeStyle = chartTheme.mirrorlyStem;
             ctx.lineWidth = 1;
             ctx.globalAlpha = 0.45;
@@ -1459,15 +1532,7 @@ function draw() {
             ctx.stroke();
             ctx.setLineDash([]);
             ctx.globalAlpha = 1;
-            drawMirrorlyMarkerBadge(
-              ctx,
-              xC,
-              yX,
-              exLab,
-              chartTheme.mirrorlyBadgeBgExit,
-              chartTheme.mirrorlyExit,
-              true,
-            );
+            drawMirrorlyExchangeDisc(ctx, xC, yX, row.exchangeRef, chartTheme.mirrorlyExit, true);
             mirrorlyHits.push({ cx: xC, cy: yX, row, kind: 'exit' });
           }
         }
