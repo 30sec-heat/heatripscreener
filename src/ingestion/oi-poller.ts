@@ -1,5 +1,3 @@
-import { pool } from './db.js';
-
 const BINANCE_FAPI = 'https://fapi.binance.com';
 
 // Shared ban state
@@ -66,13 +64,6 @@ export function feedOISample(symbol: string, oiValue: number, ts: number, timefr
   }
 }
 
-async function insertOISnapshot(ts: number, symbol: string, oi: number, oiValue: number) {
-  await pool.query(
-    `INSERT INTO oi_snapshots (ts, symbol, oi, oi_value) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
-    [new Date(ts), symbol, oi, oiValue]
-  );
-}
-
 export function startOIPoller(symbols: string[], timeframes: number[], intervalMs = 5000) {
   async function poll() {
     if (isBanned()) {
@@ -96,9 +87,6 @@ export function startOIPoller(symbols: string[], timeframes: number[], intervalM
 
           // Feed into OI OHLC bars
           feedOISample(symbol, oiValue, now, timeframes);
-
-          // Store raw snapshot
-          insertOISnapshot(now, symbol, oi, oiValue).catch(() => {});
         }
       } catch {}
     }

@@ -1,5 +1,4 @@
 import { WHALE_THRESHOLDS } from '../shared/config.js';
-import { insertLargeTrade } from './db.js';
 import type { RawTrade, LargeTrade } from '../shared/types.js';
 import { EventEmitter } from 'events';
 
@@ -46,7 +45,6 @@ export function classifyTrade(trade: RawTrade): LargeTrade | null {
     classification,
   };
 
-  insertLargeTrade(lt).catch(e => console.error('large trade insert error:', e.message));
   whaleEvents.emit('whale', lt);
   return lt;
 }

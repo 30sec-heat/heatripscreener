@@ -1,5 +1,4 @@
 import { TIMEFRAMES } from '../shared/config.js';
-import { upsertBar } from './db.js';
 import { getOIBar } from './oi-poller.js';
 import type { Bar, RawTrade } from '../shared/types.js';
 import { EventEmitter } from 'events';
@@ -115,7 +114,6 @@ function flushBar(symbol: string, tf: number, live: LiveBar) {
     netLongs: cumLongs, netShorts: cumShorts, oiOpen, oiClose,
   };
 
-  upsertBar(bar).catch(e => console.error('bar upsert error:', e.message));
   barEvents.emit('bar', bar);
 }
 
