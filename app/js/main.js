@@ -1568,6 +1568,8 @@ async function fetchT() {
 function orderedFl(list) {
   const a = [...list];
   if (tSort === 'alpha') a.sort((x, y) => x.symbol.localeCompare(y.symbol));
+  else if (tSort === 'chg')
+    a.sort((x, y) => parseFloat(y.priceChangePercent) - parseFloat(x.priceChangePercent));
   else a.sort((x, y) => parseFloat(y.quoteVolume) - parseFloat(x.quoteVolume));
   return a;
 }
