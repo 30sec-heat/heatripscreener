@@ -195,7 +195,11 @@ export function linePanelScale(vals, dT, pH) {
 }
 
 /** Spread right-end labels vertically so short tickers (Bin, Byb, …) do not overlap. */
-/** Velo orderbook/limit depth heatmap over the OHLC pane (behind candles). */
+
+/**
+ * Velo `/l/levels` price ladder often does not match live USD (offset bucket); shift so its
+ * mid tracks the visible OHLC mid, then map with the same `toY` as candles.
+ */
 export function drawOrderbookHeatmap(
   ctx,
   cells,
@@ -210,26 +214,36 @@ export function drawOrderbookHeatmap(
   pT,
   ohlcH,
   toY,
+  ohlcLo,
+  ohlcHi,
   heatmapRgb,
 ) {
-  if (!cells?.length || !prices?.length || rows < 1 || cols < 1 || shown.length < 2) return;
+  if (!cells?.length || !prices?.length || rows < 1 || cols < 1 || shown.length < 1) return;
   if (cells.length !== rows * cols) return;
+  if (cols !== prices.length) return;
+
   const tVis0 = shown[0].t;
   const tVis1 = shown[shown.length - 1].t;
   const tSpan = tVis1 - tVis0 || 1;
   const xOfT = (t) => pL + ((t - tVis0) / tSpan) * (xRight - pL);
   const rowMs = (endMs - beginMs) / rows;
 
-  let pLo = prices[0];
-  let pHi = prices[prices.length - 1];
+  const ladderMid = (prices[0] + prices[cols - 1]) / 2;
+  const chartMid = (ohlcLo + ohlcHi) / 2;
+  const yShift = chartMid - ladderMid;
+  const adj = (j) => prices[j] + yShift;
+
+  let pLo = ohlcLo;
+  let pHi = ohlcHi;
   for (const c of shown) {
     pLo = Math.min(pLo, c.l);
     pHi = Math.max(pHi, c.h);
   }
+
   let j0 = 0;
   let j1 = cols - 1;
-  while (j0 < cols && prices[j0] < pLo) j0++;
-  while (j1 > 0 && prices[j1] > pHi) j1--;
+  while (j0 < cols && adj(j0) < pLo) j0++;
+  while (j1 > 0 && adj(j1) > pHi) j1--;
   if (j0 > j1) return;
   j0 = Math.max(0, j0 - 1);
   j1 = Math.min(cols - 1, j1 + 1);
@@ -255,15 +269,15 @@ export function drawOrderbookHeatmap(
 
     for (let j = j0; j <= j1; j++) {
       const v = cells[r * cols + j];
-      if (v < 6) continue;
-      const low = prices[j];
+      if (v < 1) continue;
+      const low = adj(j);
       const high = low + stepUp(j);
       const yA = toY(low);
       const yB = toY(high);
       const yt = Math.min(yA, yB);
       const yb = Math.max(yA, yB);
       if (yb < pT || yt > pT + ohlcH) continue;
-      const alpha = (v / 255) * 0.48;
+      const alpha = (v / 255) * 0.58;
       ctx.fillStyle = `rgba(${heatmapRgb},${alpha})`;
       ctx.fillRect(xa, yt, Math.max(xb - xa, 0.35), Math.max(yb - yt, 0.5));
     }

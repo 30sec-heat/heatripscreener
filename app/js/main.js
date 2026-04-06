@@ -1711,6 +1711,8 @@ function draw() {
       pT,
       ohlcH,
       toY,
+      lo,
+      hi,
       chartTheme.heatmapRgb,
     );
   }
