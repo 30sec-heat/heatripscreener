@@ -173,6 +173,12 @@ const MIN_IND_BLOCK_PER_ROW = 14;
 const OHLC_FRAC_MIN = 0.38;
 const OHLC_FRAC_MAX = 0.88;
 let ohlcFrac = 0.64;
+/** >1 = more vertical padding (wider price range on screen); &lt;1 = tighter. Right-drag or Shift+drag on candles. */
+let priceYZoom = 1;
+let priceZoomDrag = null;
+const PRICE_Y_ZOOM_MIN = 0.12;
+const PRICE_Y_ZOOM_MAX = 52;
+const PRICE_ZOOM_SENS = 0.0065;
 let panelFracs = [];
 let lastLayout = null;
 let resizeDrag = null;
@@ -1090,13 +1096,41 @@ document.addEventListener(
   { passive: false }
 );
 
+cv.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+});
+
 cv.addEventListener('mousedown', (e) => {
-  if (e.button) return;
   const r = cv.getBoundingClientRect();
   const my = e.clientY - r.top;
   const mx = e.clientX - r.left;
 
-  if (annotDrawOn && !(e.altKey || e.metaKey) && mx >= 0 && mx <= r.width && my >= 0 && my <= r.height) {
+  if (e.button === 2) {
+    if (
+      lastLayout &&
+      mx >= lastLayout.pL &&
+      mx <= lastLayout.xRight &&
+      my > (lastLayout.ohlcTop ?? pT) + 4 &&
+      my < lastLayout.ohlcBottom - 4
+    ) {
+      priceZoomDrag = { sy: e.clientY, z0: priceYZoom };
+      e.preventDefault();
+      cv.style.cursor = 'ns-resize';
+    }
+    return;
+  }
+
+  if (e.button) return;
+
+  if (
+    annotDrawOn &&
+    !(e.altKey || e.metaKey) &&
+    !e.shiftKey &&
+    mx >= 0 &&
+    mx <= r.width &&
+    my >= 0 &&
+    my <= r.height
+  ) {
     annotDrawing = { points: [{ x: mx, y: my }] };
     e.preventDefault();
     return;
@@ -1156,6 +1190,19 @@ cv.addEventListener('mousedown', (e) => {
 
   const ohlcBottom = lastLayout?.ohlcBottom ?? H;
   if (my < ohlcBottom - 4 && mx >= 0 && mx <= r.width) {
+    if (
+      e.shiftKey &&
+      lastLayout &&
+      mx >= lastLayout.pL &&
+      mx <= lastLayout.xRight &&
+      my > (lastLayout.ohlcTop ?? pT) + 4 &&
+      my < lastLayout.ohlcBottom - 4
+    ) {
+      priceZoomDrag = { sy: e.clientY, z0: priceYZoom };
+      e.preventDefault();
+      cv.style.cursor = 'ns-resize';
+      return;
+    }
     if (e.altKey || e.metaKey) {
       plotShiftDrag = true;
       plotShiftDragX0 = e.clientX;
@@ -1173,7 +1220,12 @@ cv.addEventListener('mousedown', (e) => {
   }
 });
 window.addEventListener('mousemove', (e) => {
-  if (resizeDrag) {
+  if (priceZoomDrag) {
+    const dy = e.clientY - priceZoomDrag.sy;
+    let z = priceZoomDrag.z0 * Math.exp(dy * PRICE_ZOOM_SENS);
+    priceYZoom = Math.max(PRICE_Y_ZOOM_MIN, Math.min(PRICE_Y_ZOOM_MAX, z));
+    scheduleRedraw();
+  } else if (resizeDrag) {
     if (resizeDrag.type === 'ohlc') {
       const dy = e.clientY - resizeDrag.sy;
       let nf = resizeDrag.sFrac + dy / resizeDrag.totalH;
@@ -1232,7 +1284,7 @@ window.addEventListener('mousemove', (e) => {
     if (Math.hypot(mouseX - last.x, mouseY - last.y) >= ANNOT_MIN_DIST) pts.push({ x: mouseX, y: mouseY });
   }
   showXH = mouseX >= 0 && mouseX <= r.width && mouseY >= 0 && mouseY <= r.height;
-  if (!isDrag && !resizeDrag && !plotShiftDrag) {
+  if (!isDrag && !resizeDrag && !plotShiftDrag && !priceZoomDrag) {
     const my = e.clientY - r.top;
     const mlOhlcTop = lastLayout?.ohlcTop ?? pT;
     const mlNear =
@@ -1256,10 +1308,27 @@ window.addEventListener('mousemove', (e) => {
       else if (lastLayout.panelDividers.some((y) => Math.abs(my - y) < 5)) cv.style.cursor = 'ns-resize';
       else if (mlNear || nhNear) cv.style.cursor = 'pointer';
       else if (annotDrawOn) cv.style.cursor = 'crosshair';
+      else if (
+        e.shiftKey &&
+        my > (lastLayout.ohlcTop ?? pT) + 4 &&
+        my < lastLayout.ohlcBottom - 4 &&
+        mouseX >= lastLayout.pL &&
+        mouseX <= lastLayout.xRight
+      )
+        cv.style.cursor = 'ns-resize';
       else if (my < lastLayout.ohlcBottom - 4)
         cv.style.cursor = e.altKey || e.metaKey ? 'grab' : 'crosshair';
       else cv.style.cursor = annotDrawOn ? 'crosshair' : 'default';
     } else if (mlNear || nhNear) cv.style.cursor = 'pointer';
+    else if (
+      lastLayout &&
+      e.shiftKey &&
+      my > (lastLayout.ohlcTop ?? pT) + 4 &&
+      my < lastLayout.ohlcBottom - 4 &&
+      mouseX >= lastLayout.pL &&
+      mouseX <= lastLayout.xRight
+    )
+      cv.style.cursor = 'ns-resize';
     else cv.style.cursor = annotDrawOn ? 'crosshair' : e.altKey || e.metaKey ? 'grab' : 'crosshair';
   }
 
@@ -1273,9 +1342,12 @@ window.addEventListener('mousemove', (e) => {
       my2 <= lastLayout.ohlcBottom - 2;
     const overTip = e.target?.closest?.('#mirrorly-tip');
     const overNewsTip = e.target?.closest?.('#news-tip');
-    const mh = overOhlc && !isDrag && !resizeDrag && !plotShiftDrag ? pickMirrorlyHit(mouseX, mouseY) : null;
+    const mh =
+      overOhlc && !isDrag && !resizeDrag && !plotShiftDrag && !priceZoomDrag
+        ? pickMirrorlyHit(mouseX, mouseY)
+        : null;
     const nh =
-      ind.headlines && overOhlc && !isDrag && !resizeDrag && !plotShiftDrag && !mh
+      ind.headlines && overOhlc && !isDrag && !resizeDrag && !plotShiftDrag && !priceZoomDrag && !mh
         ? pickNewsHit(mouseX, my2)
         : null;
     if (!mirrorlyTipPinned) {
@@ -1307,7 +1379,7 @@ window.addEventListener('mousemove', (e) => {
         my3 >= otop + 2 &&
         my3 <= lastLayout.ohlcBottom - 2;
       const overNewsTip = e.target?.closest?.('#news-tip');
-      if (overOhlc && !isDrag && !resizeDrag && !plotShiftDrag) {
+      if (overOhlc && !isDrag && !resizeDrag && !plotShiftDrag && !priceZoomDrag) {
         const nh = pickNewsHit(mouseX, my3);
         if (overNewsTip) {
           /* keep */
@@ -1325,7 +1397,7 @@ window.addEventListener('mousemove', (e) => {
     prevMouseCanvasX = rx;
     prevMouseCanvasY = ry;
   }
-  if (resizeDrag || isDrag || plotShiftDrag || annotDrawing) scheduleRedraw();
+  if (resizeDrag || isDrag || plotShiftDrag || priceZoomDrag || annotDrawing) scheduleRedraw();
   else if (xhChanged) scheduleRedraw();
   else if (showXH && moved) scheduleRedraw();
 });
@@ -1341,8 +1413,13 @@ window.addEventListener('mouseup', () => {
     scheduleRedraw();
   }
   if (resizeDrag) scheduleSaveUiConfig();
-  if (resizeDrag || isDrag || plotShiftDrag) scheduleRedraw();
+  if (resizeDrag || isDrag || plotShiftDrag || priceZoomDrag) scheduleRedraw();
   if (resizeDrag) resizeDrag = null;
+  if (priceZoomDrag) {
+    priceZoomDrag = null;
+    scheduleSaveUiConfig();
+    cv.style.cursor = 'crosshair';
+  }
   if (plotShiftDrag) {
     plotShiftDrag = false;
     cv.style.cursor = 'crosshair';
@@ -1358,6 +1435,7 @@ cv.addEventListener('dblclick', () => {
   vis = 1000;
   targetVis = 1000;
   plotShiftX = 0;
+  priceYZoom = 1;
   syncVisLabel();
   updSB();
   invalidateOISlice();
@@ -1640,7 +1718,7 @@ function draw() {
     lo = Math.min(lo, c.l);
   }
   const rn = hi - lo || hi * 0.001 || 1;
-  const mg = rn * 0.05;
+  const mg = rn * 0.05 * priceYZoom;
   hi += mg;
   lo -= mg;
   const pRn = hi - lo;
@@ -2023,7 +2101,7 @@ function draw() {
       x1 = Math.max(pL, Math.min(xRight, x1));
       if (x1 <= x0 + 0.25) continue;
       ctx.strokeStyle = seg.side === 'bid' ? chartTheme.wallBid : chartTheme.wallAsk;
-      ctx.lineWidth = 1.35;
+      ctx.lineWidth = 1.62;
       ctx.globalAlpha = 0.78;
       ctx.beginPath();
       ctx.moveTo(x0, y);
@@ -2470,6 +2548,8 @@ async function switchSym(s) {
     clearTimeout(tapeWallsDeb);
     tapeWallsDeb = null;
   }
+  priceYZoom = 1;
+  priceZoomDrag = null;
   $pl.textContent = s.replace('USDT', '/USDT');
   document.title = DOC_TITLE_PAIR($pl.textContent);
   hlT(s);
@@ -2496,6 +2576,7 @@ function saveUiConfig() {
       vis,
       targetVis,
       ohlcFrac,
+      priceYZoom,
       panelFracs: [...panelFracs],
       tSort,
       tF,
@@ -2552,6 +2633,13 @@ function loadUiConfig() {
       c.ohlcFrac <= OHLC_FRAC_MAX
     )
       ohlcFrac = c.ohlcFrac;
+    if (
+      typeof c.priceYZoom === 'number' &&
+      Number.isFinite(c.priceYZoom) &&
+      c.priceYZoom >= PRICE_Y_ZOOM_MIN &&
+      c.priceYZoom <= PRICE_Y_ZOOM_MAX
+    )
+      priceYZoom = c.priceYZoom;
     if (Array.isArray(c.panelFracs)) {
       const ok = c.panelFracs.filter((n) => typeof n === 'number' && n > 0 && Number.isFinite(n));
       if (ok.length > 0) panelFracs = ok;
