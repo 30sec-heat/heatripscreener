@@ -2123,15 +2123,18 @@ function draw() {
     const yTickTop = pT + 2;
     const yBotLn = pT + ohlcH - 2;
     const barMs = tf * 1000;
-    const tHi = shown[shown.length - 1].t + barMs * TIME_X_EXTRAP_BARS;
+    const lastT = shown[shown.length - 1].t;
     const tLo = shown[0].t - barMs * TIME_X_EXTRAP_BARS;
+    /** Wall-clock ceiling so Telegram “now” is not dropped when the last bar open lags real time. */
+    const tHi = Math.max(lastT + barMs * TIME_X_EXTRAP_BARS, Date.now() + 60_000);
     for (const it of newsItems) {
       const tMs = Number(it.t);
       if (!Number.isFinite(tMs) || tMs < tLo || tMs > tHi) continue;
       const title = typeof it.title === 'string' ? it.title : '';
       if (!title) continue;
-      const x = mirrorlyXAt(shown, tMs, toX, cw);
-      if (x == null || x < pL || x > xRight) continue;
+      const xU = mirrorlyXAt(shown, tMs, toX, cw);
+      if (xU == null) continue;
+      const x = Math.max(pL, Math.min(xRight, xU));
       ctx.beginPath();
       ctx.moveTo(x, yTickTop);
       ctx.lineTo(x, yBotLn);
