@@ -11,6 +11,7 @@
     "prefetch:tickers": "tsx scripts/prefetch-tickers.ts",
     "fetch:logos": "tsx scripts/fetch-exchange-logos.ts",
     "telegram:login": "tsx scripts/telegram-login.ts",
+    "railway:telegram-session": "bash scripts/railway-set-telegram-session.sh",
     "build": "npm run build:css && npm run prefetch:tickers",
     "start": "NODE_OPTIONS='--dns-result-order=ipv4first' tsx src/server/index.ts",
     "ingest": "tsx src/ingestion/index.ts",
