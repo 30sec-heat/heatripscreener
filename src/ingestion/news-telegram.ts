@@ -7,15 +7,15 @@ import { fetchVelo, type VeloBar } from '../shared/velo.js';
 export type NewsItem = { t: number; title: string; url?: string; macro?: boolean };
 
 const BTC_SYM = 'BTCUSDT';
-const REACT_WINDOW_MIN = Math.max(5, Math.min(45, Number(process.env.NEWS_REACT_WINDOW_MIN) || 15));
+const REACT_WINDOW_MIN = Math.max(1, Math.min(45, Number(process.env.NEWS_REACT_WINDOW_MIN) || 3));
 const REACT_MIN_RANGE = Math.max(
   0.0005,
-  Math.min(0.02, Number(process.env.NEWS_REACT_MIN_RANGE) || 0.001),
+  Math.min(0.02, Number(process.env.NEWS_REACT_MIN_RANGE) || 0.0025),
 );
 /** Min |close(N min after news) − close(headline bar)| / ref — proves price didn’t just chop in-place. */
 const REACT_MIN_NET = Math.max(
   0,
-  Math.min(0.02, Number(process.env.NEWS_REACT_MIN_NET) || REACT_MIN_RANGE * 0.35),
+  Math.min(0.02, Number(process.env.NEWS_REACT_MIN_NET) || REACT_MIN_RANGE * 0.4),
 );
 const BTC_HISTORY_H = Math.max(24, Math.min(120, Number(process.env.NEWS_BTC_HISTORY_H) || 96));
 const TG_POLL_MS = Math.max(30_000, Number(process.env.TELEGRAM_NEWS_POLL_MS) || 90_000);
