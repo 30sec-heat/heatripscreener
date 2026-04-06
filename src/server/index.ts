@@ -10,6 +10,7 @@ import { startOIPoller, isBanned, checkBanResponse } from '../ingestion/oi-polle
 import { startVeloLivePoller } from '../ingestion/velo-live-bars.js';
 import { applyLiveTickerOverlay, startBinanceMiniTickerWs } from '../ingestion/binance-mini-ticker-ws.js';
 import { getNewsItems, startNewsTelegramPoller } from '../ingestion/news-telegram.js';
+import { getRssFallbackNews } from '../ingestion/news-rss-fallback.js';
 import {
   fetchVeloRaw,
   ALL_EXCHANGES,
@@ -192,12 +193,23 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (url.pathname === '/api/news') {
-    res.writeHead(200, {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-      'Cache-Control': 'public, max-age=15',
-    });
-    res.end(JSON.stringify({ items: getNewsItems() }));
+    try {
+      let items = getNewsItems();
+      if (!items.length) items = await getRssFallbackNews();
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control': 'public, max-age=15',
+      });
+      res.end(JSON.stringify({ items }));
+    } catch {
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control': 'public, max-age=15',
+      });
+      res.end(JSON.stringify({ items: getNewsItems() }));
+    }
     return;
   }
 
