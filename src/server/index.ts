@@ -9,7 +9,7 @@ import { setupWebSocket } from './ws-handler.js';
 import { startOIPoller, isBanned, checkBanResponse } from '../ingestion/oi-poller.js';
 import { startVeloLivePoller } from '../ingestion/velo-live-bars.js';
 import { applyLiveTickerOverlay, startBinanceMiniTickerWs } from '../ingestion/binance-mini-ticker-ws.js';
-import { getNewsItems, startNewsRssPoller } from '../ingestion/news-rss.js';
+import { getNewsItems, startNewsTelegramPoller } from '../ingestion/news-telegram.js';
 import {
   fetchVeloRaw,
   ALL_EXCHANGES,
@@ -236,7 +236,7 @@ const server = http.createServer(async (req, res) => {
 
 void refreshTickers();
 startBinanceMiniTickerWs();
-startNewsRssPoller();
+startNewsTelegramPoller();
 startMirrorlyIngestion();
 
 setupWebSocket(server);

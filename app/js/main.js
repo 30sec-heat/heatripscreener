@@ -294,7 +294,7 @@ document.querySelectorAll('[data-ex]').forEach((b) => {
 let chartHistoryLoaded = false;
 
 let sym = 'BTCUSDT';
-/** RSS headlines from GET /api/news. */
+/** Telegram-sourced headlines from GET /api/news. */
 let newsItems = [];
 /** Headline hover targets set in draw() when Headlines is on. */
 let newsHits = [];
