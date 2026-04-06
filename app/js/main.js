@@ -1294,12 +1294,25 @@ cv.addEventListener('mousedown', (e) => {
 
   const ohlcBottom = lastLayout?.ohlcBottom ?? H;
   if (my < ohlcBottom - 4 && mx >= 0 && mx <= r.width) {
+    const otop = lastLayout?.ohlcTop ?? pT;
+    if (
+      lastLayout &&
+      mx > lastLayout.xRight &&
+      mx <= r.width &&
+      my > otop + 4 &&
+      my < lastLayout.ohlcBottom - 4
+    ) {
+      priceZoomDrag = { sy: e.clientY, z0: priceYZoom };
+      e.preventDefault();
+      cv.style.cursor = 'ns-resize';
+      return;
+    }
     if (
       e.shiftKey &&
       lastLayout &&
       mx >= lastLayout.pL &&
       mx <= lastLayout.xRight &&
-      my > (lastLayout.ohlcTop ?? pT) + 4 &&
+      my > otop + 4 &&
       my < lastLayout.ohlcBottom - 4
     ) {
       priceZoomDrag = { sy: e.clientY, z0: priceYZoom };
@@ -1390,6 +1403,12 @@ window.addEventListener('mousemove', (e) => {
   showXH = mouseX >= 0 && mouseX <= r.width && mouseY >= 0 && mouseY <= r.height;
   if (!isDrag && !resizeDrag && !plotShiftDrag && !priceZoomDrag) {
     const my = e.clientY - r.top;
+    const onPriceRuler =
+      lastLayout &&
+      mouseX > lastLayout.xRight &&
+      mouseX <= r.width &&
+      my > (lastLayout.ohlcTop ?? pT) + 4 &&
+      my < lastLayout.ohlcBottom - 4;
     const mlOhlcTop = lastLayout?.ohlcTop ?? pT;
     const mlNear =
       ind.mirrorly &&
@@ -1412,6 +1431,7 @@ window.addEventListener('mousemove', (e) => {
       else if (lastLayout.panelDividers.some((y) => Math.abs(my - y) < 5)) cv.style.cursor = 'ns-resize';
       else if (mlNear || nhNear) cv.style.cursor = 'pointer';
       else if (annotDrawOn) cv.style.cursor = 'crosshair';
+      else if (onPriceRuler) cv.style.cursor = 'ns-resize';
       else if (
         e.shiftKey &&
         my > (lastLayout.ohlcTop ?? pT) + 4 &&
@@ -1424,6 +1444,7 @@ window.addEventListener('mousemove', (e) => {
         cv.style.cursor = e.altKey || e.metaKey ? 'grab' : 'crosshair';
       else cv.style.cursor = annotDrawOn ? 'crosshair' : 'default';
     } else if (mlNear || nhNear) cv.style.cursor = 'pointer';
+    else if (onPriceRuler) cv.style.cursor = 'ns-resize';
     else if (
       lastLayout &&
       e.shiftKey &&
