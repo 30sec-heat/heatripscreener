@@ -40,9 +40,9 @@
         <label class="layer-opt" title="Vol range % p99 crossover + RSI"><input type="checkbox" data-ind="vrng"> R% vol sniper</label>
         <label class="layer-opt" title="Volume bars blended in the price pane (under candles)"><input type="checkbox" data-ind="volume"> Volume (main)</label>
         <label class="layer-opt" title="Per-venue lines for OI / net L−S"><input type="checkbox" data-ind="split"> Split by venue</label>
-        <label class="layer-opt" title="Headlines from Telegram @marketfeed (Market News Feed), last week; server TELEGRAM_NEWS_CHANNEL_ID only to override. Click marker to pin tip."><input type="checkbox" data-ind="headlines"> Headlines</label>
-        <label class="layer-opt" title="Mirrorly tracked traders: open positions + exits in the last 7 days"><input type="checkbox" data-ind="mirrorly"> Mirrorly</label>
-        <label class="layer-opt" title="TapeSurf (Binance): thick resting liquidity — horizontal lines at top bid/ask levels per minute (~last 6h of the visible window)."><input type="checkbox" data-ind="obwalls"> OB walls</label>
+        <label class="layer-opt"><input type="checkbox" data-ind="headlines"> Headlines</label>
+        <label class="layer-opt"><input type="checkbox" data-ind="mirrorly"> Mirrorly</label>
+        <label class="layer-opt"><input type="checkbox" data-ind="obwalls"> OB walls</label>
       </div>
     </details>
     <span class="field-label">Venues</span>
@@ -74,7 +74,7 @@
 <div id="main">
   <div class="chart-card">
     <div id="cw">
-      <canvas id="cv" title="Wheel: zoom time axis centered on cursor. Shift+wheel: scroll history. Drag: pan candles. Alt+drag: fine nudge. Right-drag or Shift+drag on candles: vertical price zoom. Double-click: reset."></canvas>
+      <canvas id="cv" title="Scroll to zoom, drag to pan, double-click to reset."></canvas>
       <div id="sbw"><div id="sbt"></div></div>
     </div>
   </div>
