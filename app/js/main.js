@@ -447,7 +447,7 @@ function newsTipEl() {
   return document.getElementById('news-tip');
 }
 
-function showNewsTip(title, url, clientX, clientY) {
+function showNewsTip(title, url, macro, clientX, clientY) {
   const tip = newsTipEl();
   if (!tip) return;
   tip.hidden = false;
@@ -456,7 +456,7 @@ function showNewsTip(title, url, clientX, clientY) {
   card.className = 'mirrorly-tip-card';
   const head = document.createElement('div');
   head.className = 'mirrorly-tip-mark';
-  head.textContent = 'Headline';
+  head.textContent = macro ? 'Macro · BTC tape' : 'Headline';
   const tEl = document.createElement('div');
   tEl.className = 'mirrorly-tip-name';
   tEl.style.marginTop = '6px';
@@ -1229,7 +1229,7 @@ window.addEventListener('mousemove', (e) => {
         showMirrorlyTip(mh.row, mh.kind, e.clientX, e.clientY);
       } else if (nh) {
         hideMirrorlyTip();
-        showNewsTip(nh.title, nh.url, e.clientX, e.clientY);
+        showNewsTip(nh.title, nh.url, nh.macro, e.clientX, e.clientY);
       } else {
         hideMirrorlyTip();
         hideNewsTip();
@@ -1252,7 +1252,7 @@ window.addEventListener('mousemove', (e) => {
         const nh = pickNewsHit(mouseX, my3);
         if (overNewsTip) {
           /* keep */
-        } else if (nh) showNewsTip(nh.title, nh.url, e.clientX, e.clientY);
+        } else if (nh) showNewsTip(nh.title, nh.url, nh.macro, e.clientX, e.clientY);
         else hideNewsTip();
       } else if (!overNewsTip) hideNewsTip();
     } else if (!e.target?.closest?.('#news-tip')) hideNewsTip();
@@ -1885,7 +1885,7 @@ function draw() {
       ctx.closePath();
       ctx.fill();
       const url = typeof it.url === 'string' ? it.url : '';
-      newsHits.push({ x, title, url: url || undefined });
+      newsHits.push({ x, title, url: url || undefined, macro: !!it.macro });
     }
     ctx.setLineDash([]);
   }
