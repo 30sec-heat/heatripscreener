@@ -2203,7 +2203,7 @@ function draw() {
       if (x1 <= x0 + 0.25) continue;
       ctx.strokeStyle = seg.side === 'bid' ? chartTheme.wallBid : chartTheme.wallAsk;
       ctx.lineWidth = 1.62;
-      ctx.globalAlpha = 0.78;
+      ctx.globalAlpha = 0.52;
       ctx.beginPath();
       ctx.moveTo(x0, y);
       ctx.lineTo(x1, y);
