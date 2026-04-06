@@ -8,6 +8,7 @@ import { BUNDLED_TICKERS } from '../data/bundled-tickers.gen.js';
 import { setupWebSocket } from './ws-handler.js';
 import { startOIPoller, isBanned, checkBanResponse } from '../ingestion/oi-poller.js';
 import { startVeloLivePoller } from '../ingestion/velo-live-bars.js';
+import { applyLiveTickerOverlay, startBinanceMiniTickerWs } from '../ingestion/binance-mini-ticker-ws.js';
 import {
   fetchVeloRaw,
   ALL_EXCHANGES,
@@ -182,9 +183,9 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, {
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*',
-      'Cache-Control': 'public, max-age=8',
+      'Cache-Control': 'public, max-age=2',
     });
-    res.end(JSON.stringify(tickerCache));
+    res.end(JSON.stringify(applyLiveTickerOverlay(tickerCache)));
     return;
   }
 
@@ -223,6 +224,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 void refreshTickers();
+startBinanceMiniTickerWs();
 startMirrorlyIngestion();
 
 setupWebSocket(server);

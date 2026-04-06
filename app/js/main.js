@@ -2481,7 +2481,10 @@ $chartCopy?.addEventListener('click', async () => {
   await Promise.all([loadExchangeLogoManifest(), fetchT(), loadChart()]);
   updSB();
   scheduleRedraw();
-  setInterval(fetchT, 12_000);
+  setInterval(() => {
+    if (document.visibilityState !== 'visible') return;
+    void fetchT();
+  }, 2000);
   setInterval(refreshChartSilent, 180_000);
   setInterval(() => {
     if (ind.mirrorly) void refreshMirrorly();
