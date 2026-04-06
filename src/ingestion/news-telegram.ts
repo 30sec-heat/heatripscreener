@@ -54,6 +54,45 @@ function firstUrlFromMessage(text: string, entities?: Api.TypeMessageEntity[]): 
   return undefined;
 }
 
+/** GramJS returns TL objects with className; instanceof checks are brittle across builds. */
+function telegramMessageId(raw: { id?: unknown }): number | undefined {
+  const id = raw.id;
+  if (id == null) return undefined;
+  if (typeof id === 'number' && Number.isFinite(id)) return id;
+  if (typeof id === 'bigint') return Number(id);
+  if (typeof id === 'object' && id !== null && 'valueOf' in id) {
+    const v = Number((id as { valueOf: () => number }).valueOf());
+    if (Number.isFinite(v)) return v;
+  }
+  const n = Number(id as number);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/**
+ * Map one GramJS message row to NewsItem. Only channel text posts (`className === 'Message'`).
+ */
+function tgRowToNewsItem(raw: unknown): NewsItem | null {
+  if (raw == null || typeof raw !== 'object') return null;
+  const cn = (raw as { className?: string }).className;
+  if (cn !== 'Message') return null;
+  const m = raw as Api.Message;
+  const text = (m.message || '').trim();
+  if (text.length < 4) return null;
+  const dateSec = Number(m.date);
+  if (!Number.isFinite(dateSec)) return null;
+  const msgId = telegramMessageId(m);
+  if (msgId == null) return null;
+  const t = dateSec * 1000;
+  const url = firstUrlFromMessage(m.message || '', m.entities);
+  return {
+    msgId,
+    t,
+    title: text.slice(0, 500),
+    url,
+    macro: titleLooksMacro(text),
+  };
+}
+
 /** Broad macro / geopolitical / rates bucket — chart badge only. */
 function titleLooksMacro(title: string): boolean {
   const s = title.toLowerCase();
@@ -113,23 +152,6 @@ function titleLooksMacro(title: string): boolean {
   return keys.some((k) => s.includes(k));
 }
 
-function messageToItem(m: Api.Message): NewsItem | null {
-  const text = (m.message || '').trim();
-  if (text.length < 4) return null;
-  const dateSec = Number(m.date);
-  if (!Number.isFinite(dateSec)) return null;
-  const t = dateSec * 1000;
-  const url = firstUrlFromMessage(m.message || '', m.entities);
-  const idNum = typeof m.id === 'bigint' ? Number(m.id) : Number(m.id);
-  return {
-    msgId: Number.isFinite(idNum) ? idNum : undefined,
-    t,
-    title: text.slice(0, 500),
-    url,
-    macro: titleLooksMacro(text),
-  };
-}
-
 /**
  * Walk channel history backward from the latest message until we pass the retention cutoff.
  * Dedupes by Telegram message id only (same post fetched on overlapping pages).
@@ -141,6 +163,7 @@ async function fetchChannelMessagesRetained(
   const sinceSec = Math.floor((Date.now() - RETENTION_MS) / 1000);
   const byId = new Map<number, NewsItem>();
   let offsetId = 0;
+  let totalRaw = 0;
 
   for (let page = 0; page < TG_MAX_PAGES; page++) {
     const batch = await c.getMessages(peer, {
@@ -149,26 +172,36 @@ async function fetchChannelMessagesRetained(
     });
     if (!batch?.length) break;
 
+    totalRaw += batch.length;
     let oldestSecInPage = Infinity;
     for (const raw of batch) {
-      if (!raw || !(raw instanceof Api.Message)) continue;
-      const ds = Number(raw.date);
+      if (!raw || typeof raw !== 'object') continue;
+      const ds = Number((raw as { date?: unknown }).date);
       if (Number.isFinite(ds)) oldestSecInPage = Math.min(oldestSecInPage, ds);
       if (ds < sinceSec) continue;
-      const it = messageToItem(raw);
-      if (it?.msgId != null) byId.set(it.msgId, it);
+      const it = tgRowToNewsItem(raw);
+      if (it && it.msgId != null) byId.set(it.msgId, it);
     }
 
-    const last = batch[batch.length - 1];
-    if (!(last instanceof Api.Message)) break;
+    const last = batch[batch.length - 1] as { id?: unknown; className?: string } | undefined;
+    if (!last) break;
     if (oldestSecInPage < sinceSec) break;
 
-    offsetId = typeof last.id === 'bigint' ? Number(last.id) : Number(last.id);
-    if (!Number.isFinite(offsetId)) break;
+    const lastOff = telegramMessageId(last);
+    if (lastOff == null) break;
+    offsetId = lastOff;
     if (batch.length < TG_PAGE) break;
   }
 
-  return [...byId.values()].sort((a, b) => b.t - a.t);
+  const out = [...byId.values()].sort((a, b) => b.t - a.t);
+  if (!out.length && totalRaw > 0) {
+    console.warn(
+      '[news-tg] Telegram returned',
+      totalRaw,
+      'rows but parsed 0 text headlines — check channel posts or TELEGRAM_NEWS_CHANNEL_ID',
+    );
+  }
+  return out;
 }
 
 async function ensureTelegramClient(): Promise<TelegramClient | null> {
@@ -218,6 +251,7 @@ async function refreshLoop(): Promise<void> {
       if (c) {
         const peer = channelPeer();
         cache = await fetchChannelMessagesRetained(c, peer);
+        if (cache.length) console.log('[news-tg]', cache.length, 'headlines from Telegram @', String(peer));
       }
     } catch (e) {
       console.warn('[news-tg] poll error', e);
