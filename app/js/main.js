@@ -9,13 +9,7 @@ import {
   computeOscCrossP95Arrows,
   computeVolRangeSniper,
 } from './sniper.js';
-import {
-  drawLine,
-  drawOiCandlesPanel,
-  linePanelScale,
-  staggerEndLabelYs,
-  drawOrderbookHeatmap,
-} from './draw.js';
+import { drawLine, drawOiCandlesPanel, linePanelScale, staggerEndLabelYs } from './draw.js';
 import { computeOscillator, rollingOscQuantile } from './oscillator.js';
 import { computeRSI } from './rsi.js';
 import { aggregateOHLCVFrom1m, downsampleCumToTf, aggregatePerExOiToTf } from './timeframe.js';
@@ -171,7 +165,6 @@ const ind = {
   split: false,
   headlines: false,
   mirrorly: false,
-  heatmap: false,
 };
 const PANEL_GAP = 4;
 /** Min height for all indicator rows combined (drag OHLC vs stack divider). */
@@ -183,10 +176,6 @@ let panelFracs = [];
 let lastLayout = null;
 let resizeDrag = null;
 const oscCache = { k: '', arr: [], p95: [], rsi: [], oscCrossSig: [] };
-/** Velo `/api/levels` grid for OB heatmap; `k` includes sym + begin + end + spread. */
-const levelsCache = { k: '', payload: /** @type {null | { begin: number; end: number; prices: number[]; rows: number; cols: number; cells: Uint8Array }} */ (null) };
-let heatmapFetchTimer = /** @type {ReturnType<typeof setTimeout> | null} */ (null);
-let heatmapSchedSig = '';
 const exOn = new Set(['binance-futures', 'bybit', 'okex-swap', 'deribit', 'hyperliquid']);
 const KNOWN_EX = ['binance-futures', 'bybit', 'okex-swap', 'deribit', 'hyperliquid'];
 
@@ -258,98 +247,6 @@ function invalidateOICaches() {
   invalidateOscDerived();
 }
 
-function decodeLevelsPayload(j) {
-  if (!j || j.error || typeof j.data !== 'string' || !Array.isArray(j.prices)) return null;
-  const rows = j.rows | 0;
-  const cols = j.cols | 0;
-  if (rows < 1 || cols < 1) return null;
-  let bin;
-  try {
-    bin = atob(j.data);
-  } catch {
-    return null;
-  }
-  const cells = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) cells[i] = bin.charCodeAt(i);
-  if (cells.length !== rows * cols) return null;
-  return {
-    begin: Number(j.begin),
-    end: Number(j.end),
-    prices: j.prices.map(Number),
-    rows,
-    cols,
-    cells,
-  };
-}
-
-function heatmapVisibleRangeMs() {
-  const ext1m = ext1mSeries();
-  const all = displayAllFromExt(ext1m);
-  if (!all.length) return null;
-  const v = Math.min(all.length, vis);
-  let end = all.length - scrollOff;
-  if (end < 1) end = all.length;
-  const st = Math.max(0, end - v);
-  const shown = all.slice(st, end);
-  if (!shown.length) return null;
-  return { t0: shown[0].t, t1: shown[shown.length - 1].t };
-}
-
-async function fetchLevelsForVisibleRange(t0, t1) {
-  if (!ind.heatmap) return;
-  const pad = 120000;
-  let begin = Math.floor(t0 - pad);
-  let end = Math.floor(t1 + pad);
-  const maxSpan = 12 * 3600000;
-  if (end - begin > maxSpan) begin = end - maxSpan;
-  const minSpan = 90_000;
-  if (end - begin < minSpan) begin = end - minSpan;
-  if (end <= begin) return;
-  const spread = 1;
-  const k = `${sym}:${begin}:${end}:${spread}`;
-  if (levelsCache.k === k && levelsCache.payload) return;
-  try {
-    const r = await fetch(
-      `/api/levels?symbol=${encodeURIComponent(sym)}&begin=${begin}&end=${end}&spread=${spread}`,
-    );
-    let j = null;
-    try {
-      j = await r.json();
-    } catch {
-      j = null;
-    }
-    if (!r.ok || !j || j.error) {
-      levelsCache.k = k;
-      levelsCache.payload = null;
-      scheduleRedraw();
-      return;
-    }
-    const payload = decodeLevelsPayload(j);
-    levelsCache.k = k;
-    levelsCache.payload = payload;
-    scheduleRedraw();
-  } catch {
-    levelsCache.k = '';
-    levelsCache.payload = null;
-  }
-}
-
-function scheduleHeatmapRangeFetch(t0, t1) {
-  if (!ind.heatmap) return;
-  const sig = `${sym}:${t0}:${t1}`;
-  if (sig === heatmapSchedSig && (levelsCache.payload || heatmapFetchTimer)) return;
-  if (sig !== heatmapSchedSig) {
-    levelsCache.k = '';
-    levelsCache.payload = null;
-  }
-  heatmapSchedSig = sig;
-  if (heatmapFetchTimer) clearTimeout(heatmapFetchTimer);
-  heatmapFetchTimer = setTimeout(() => {
-    heatmapFetchTimer = null;
-    void fetchLevelsForVisibleRange(t0, t1);
-  }, 200);
-}
-
 document.querySelectorAll('input[data-ind]').forEach((inp) => {
   inp.addEventListener('change', () => {
     const kk = inp.dataset.ind;
@@ -369,26 +266,6 @@ document.querySelectorAll('input[data-ind]').forEach((inp) => {
         mirrorlyTipPinned = false;
         mirrorlyTipPinnedKey = '';
         hideMirrorlyTip();
-      }
-    }
-    if (kk === 'heatmap') {
-      if (ind.heatmap) {
-        levelsCache.k = '';
-        levelsCache.payload = null;
-        heatmapSchedSig = '';
-        const rng = heatmapVisibleRangeMs();
-        if (rng) {
-          heatmapSchedSig = `${sym}:${rng.t0}:${rng.t1}`;
-          void fetchLevelsForVisibleRange(rng.t0, rng.t1);
-        }
-      } else {
-        levelsCache.k = '';
-        levelsCache.payload = null;
-        heatmapSchedSig = '';
-        if (heatmapFetchTimer) {
-          clearTimeout(heatmapFetchTimer);
-          heatmapFetchTimer = null;
-        }
       }
     }
     if (kk === 'split' && ind.split) {
@@ -1685,8 +1562,6 @@ function draw() {
     return;
   }
 
-  if (ind.heatmap) scheduleHeatmapRangeFetch(shown[0].t, shown[shown.length - 1].t);
-
   let oiPanelHud = null;
 
   if (ind.osc || ind.rev || ind.vrng) ensureOscDerived(all);
@@ -1751,29 +1626,6 @@ function draw() {
   ctx.beginPath();
   ctx.rect(pL, pT, xRight - pL, ohlcH);
   ctx.clip();
-
-  if (ind.heatmap && levelsCache.payload) {
-    drawOrderbookHeatmap(
-      ctx,
-      levelsCache.payload.cells,
-      levelsCache.payload.rows,
-      levelsCache.payload.cols,
-      levelsCache.payload.prices,
-      levelsCache.payload.begin,
-      levelsCache.payload.end,
-      shown,
-      pL,
-      xRight,
-      pT,
-      ohlcH,
-      cw,
-      plotShiftX,
-      toY,
-      lo,
-      hi,
-      chartTheme.heatmapRgb,
-    );
-  }
 
   if (ind.volume && ohlcH > 24) {
     let mx = 0;
@@ -2512,9 +2364,6 @@ async function switchSym(s) {
   vis = 1000;
   targetVis = 1000;
   loadedHours = 17;
-  levelsCache.k = '';
-  levelsCache.payload = null;
-  heatmapSchedSig = '';
   invalidateOICaches();
   sym = s;
   mirrorlyTipPinned = false;

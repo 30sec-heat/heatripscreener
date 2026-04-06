@@ -17,7 +17,6 @@ import {
   buildPerVenueOISymbol,
   sleep,
 } from '../shared/velo.js';
-import { fetchVeloLevelsBuffer, parseVeloLevelsBinary } from '../shared/velo-levels.js';
 import {
   startMirrorlyIngestion,
   getMirrorlyForChartSymbol,
@@ -154,55 +153,6 @@ const server = http.createServer(async (req, res) => {
 
   // Returns { bars: [...], oiByEx: { "binance-futures": [{t,o,h,l,c},...], ... } }
   // Frontend computes net L/S, aggregated OI, and split views locally
-  if (url.pathname === '/api/levels') {
-    const rawSym = (url.searchParams.get('symbol') ?? 'BTCUSDT').toUpperCase();
-    const symbol = /^[A-Z0-9]{2,24}USDT$/.test(rawSym) ? rawSym : 'BTCUSDT';
-    const spread = Math.max(1, Math.min(50, parseInt(url.searchParams.get('spread') ?? '1', 10) || 1));
-    const now = Date.now();
-    const maxSpan = 12 * 3600000;
-    const qBegin = parseInt(url.searchParams.get('begin') ?? '', 10);
-    const qEnd = parseInt(url.searchParams.get('end') ?? '', 10);
-    let begin: number;
-    let end: number;
-    if (Number.isFinite(qBegin) && Number.isFinite(qEnd) && qEnd > qBegin) {
-      begin = Math.floor(qBegin);
-      end = Math.floor(Math.min(qEnd, now + 60000));
-      if (end - begin > maxSpan) begin = end - maxSpan;
-    } else {
-      const hours = Math.min(12, Math.max(1, parseFloat(url.searchParams.get('hours') ?? '4') || 4));
-      end = now;
-      begin = Math.floor(now - hours * 3600000);
-    }
-    const minSpan = 90_000;
-    if (end - begin < minSpan) begin = end - minSpan;
-
-    try {
-      const raw = await fetchVeloLevelsBuffer(symbol, begin, end, spread);
-      const parsed = parseVeloLevelsBinary(raw);
-      const grid = Buffer.from(parsed.grid);
-      res.writeHead(200, {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-        'Cache-Control': 'public, max-age=8',
-      });
-      res.end(
-        JSON.stringify({
-          begin,
-          end: now,
-          meta: parsed.meta,
-          prices: parsed.prices,
-          rows: parsed.rowCount,
-          cols: parsed.prices.length,
-          data: grid.toString('base64'),
-        }),
-      );
-    } catch (e: any) {
-      res.writeHead(502, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-      res.end(JSON.stringify({ error: e?.message ?? 'levels_fetch_failed' }));
-    }
-    return;
-  }
-
   if (url.pathname === '/api/chart') {
     const symbol = url.searchParams.get('symbol') ?? 'BTCUSDT';
     const hours = Math.min(
