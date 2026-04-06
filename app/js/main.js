@@ -2209,8 +2209,8 @@ function draw() {
       x1 = Math.max(pL, Math.min(xRight, x1));
       if (x1 <= x0 + 0.25) continue;
       ctx.strokeStyle = seg.side === 'bid' ? chartTheme.wallBid : chartTheme.wallAsk;
-      ctx.lineWidth = 1.62;
-      ctx.globalAlpha = 0.52;
+      ctx.lineWidth = 1.85;
+      ctx.globalAlpha = 0.76;
       ctx.beginPath();
       ctx.moveTo(x0, y);
       ctx.lineTo(x1, y);
