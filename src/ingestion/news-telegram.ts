@@ -7,25 +7,25 @@ import { fetchVelo, type VeloBar } from '../shared/velo.js';
 export type NewsItem = { t: number; title: string; url?: string; macro?: boolean };
 
 const BTC_SYM = 'BTCUSDT';
-const REACT_WINDOW_MIN = Math.max(1, Math.min(45, Number(process.env.NEWS_REACT_WINDOW_MIN) || 8));
+/** How many 1m bars *after* the headline count toward the reaction (longer = less noise). */
+const REACT_WINDOW_MIN = Math.max(1, Math.min(45, Number(process.env.NEWS_REACT_WINDOW_MIN) || 10));
 /**
- * Relative gate: post-headline move must reach this quantile of *all* same-length
- * forward windows in recent BTC tape (adapts to vol regime). E.g. 0.87 ≈ top ~13%.
- * Override per-metric with NEWS_REACT_RANGE_Q / NEWS_REACT_NET_Q.
+ * Fixed gates vs headline bar close (ref). All three must pass (AND), unless NEWS_REACT_COMBINE=or
+ * (then: full-window range OR net drift OR max single-bar range, each vs its own threshold).
  */
-const REACT_QUANTILE_SHARED = Number(process.env.NEWS_REACT_QUANTILE);
-const REACT_RANGE_Q = Math.max(
-  0.5,
-  Math.min(0.995, Number(process.env.NEWS_REACT_RANGE_Q) || (Number.isFinite(REACT_QUANTILE_SHARED) ? REACT_QUANTILE_SHARED : 0.87)),
+const MIN_POST_RANGE_FRAC = Math.max(
+  0.0004,
+  Math.min(0.05, Number(process.env.NEWS_REACT_MIN_RANGE) || 0.0026),
 );
-const REACT_NET_Q = Math.max(
-  0.5,
-  Math.min(0.995, Number(process.env.NEWS_REACT_NET_Q) || (Number.isFinite(REACT_QUANTILE_SHARED) ? REACT_QUANTILE_SHARED : 0.87)),
+const MIN_POST_NET_FRAC = Math.max(
+  0,
+  Math.min(0.05, Number(process.env.NEWS_REACT_MIN_NET) || 0.00135),
 );
-/** Hard floors (fraction of ref) when tape is dead or baseline sample is thin. */
-const ABS_MIN_RANGE = Math.max(0, Math.min(0.05, Number(process.env.NEWS_REACT_ABS_MIN_RANGE) || 0.001));
-const ABS_MIN_NET = Math.max(0, Math.min(0.05, Number(process.env.NEWS_REACT_ABS_MIN_NET) || 0.00065));
-const BASELINE_MIN_WINDOWS = Math.max(24, Math.min(500, Number(process.env.NEWS_REACT_BASELINE_MIN_N) || 40));
+/** At least one minute in the window must “do something” (kills tight dead closes). */
+const MIN_MAX_BAR_RANGE_FRAC = Math.max(
+  0,
+  Math.min(0.02, Number(process.env.NEWS_REACT_MIN_BAR_RANGE) || 0.00048),
+);
 const BTC_HISTORY_H = Math.max(24, Math.min(120, Number(process.env.NEWS_BTC_HISTORY_H) || 96));
 const TG_POLL_MS = Math.max(30_000, Number(process.env.TELEGRAM_NEWS_POLL_MS) || 90_000);
 /** Max headlines kept for /api/news and the chart (Telegram fetch targets this count). */
@@ -136,81 +136,48 @@ function barIndexContaining(bars: VeloBar[], tMs: number): number {
   return -1;
 }
 
-/** Ascending-sorted sample: q in [0,1], value at or above ~q fraction of the mass. */
-function ascendingQuantile(sortedAsc: number[], q: number): number {
-  if (!sortedAsc.length) return Infinity;
-  const qq = Math.max(0, Math.min(1, q));
-  const idx = Math.min(sortedAsc.length - 1, Math.floor(qq * (sortedAsc.length - 1)));
-  return sortedAsc[idx];
-}
-
-function forwardWindowMetrics(bars: VeloBar[], startIdx: number, W: number): { rangeFrac: number; netFrac: number } | null {
-  if (startIdx < 0 || startIdx + W >= bars.length) return null;
-  const ref = Math.max(bars[startIdx].c, 1e-12);
-  let maxH = -Infinity;
-  let minL = Infinity;
-  for (let j = startIdx + 1; j <= startIdx + W; j++) {
-    maxH = Math.max(maxH, bars[j].h);
-    minL = Math.min(minL, bars[j].l);
-  }
-  if (!Number.isFinite(maxH) || !Number.isFinite(minL)) return null;
-  const endClose = bars[startIdx + W].c;
-  return {
-    rangeFrac: (maxH - minL) / ref,
-    netFrac: Math.abs(endClose - ref) / ref,
-  };
-}
-
-/** One value per valid start index s: move over bars (s+1..s+W) vs ref at s.c */
-function collectForwardBaseline(bars: VeloBar[], W: number): { ranges: number[]; nets: number[] } {
-  const ranges: number[] = [];
-  const nets: number[] = [];
-  for (let s = 0; s + W < bars.length; s++) {
-    const m = forwardWindowMetrics(bars, s, W);
-    if (m) {
-      ranges.push(m.rangeFrac);
-      nets.push(m.netFrac);
-    }
-  }
-  ranges.sort((a, b) => a - b);
-  nets.sort((a, b) => a - b);
-  return { ranges, nets };
-}
-
 /**
- * Keep a headline only if BTC’s *next* W 1m bars are unusually large vs the same
- * W-bar signature computed everywhere on the recent tape (quantile gates + abs floors).
- * NEWS_REACT_COMBINE=or → either range or net clears its bar (still vs distribution thresholds).
+ * After headline bar i: measure W 1m bars (i+1..i+W) only. Ref = headline close.
+ * Pass = window hi/lo span, absolute net drift, and liveliest single minute all clear floors.
  */
 function filterNewsByPostHeadlineMove(items: NewsItem[], bars: VeloBar[]): NewsItem[] {
   if (!bars.length) return [];
   const W = Math.max(1, Math.round(REACT_WINDOW_MIN));
-  const { ranges: rangesAsc, nets: netsAsc } = collectForwardBaseline(bars, W);
-  const useQuantile = rangesAsc.length >= BASELINE_MIN_WINDOWS;
-  let rangeThr: number;
-  let netThr: number;
-  if (useQuantile) {
-    rangeThr = Math.max(ABS_MIN_RANGE, ascendingQuantile(rangesAsc, REACT_RANGE_Q));
-    netThr = Math.max(ABS_MIN_NET, ascendingQuantile(netsAsc, REACT_NET_Q));
-  } else {
-    rangeThr = ABS_MIN_RANGE;
-    netThr = ABS_MIN_NET;
-  }
-
   const out: NewsItem[] = [];
   const tFirst = bars[0].t;
   const tLast = bars[bars.length - 1].t + 60_000;
+  const looseOr = process.env.NEWS_REACT_COMBINE === 'or';
+
   for (const it of items) {
     const tNews = it.t;
     if (tNews < tFirst || tNews >= tLast) continue;
     const i = barIndexContaining(bars, tNews);
     if (i < 0 || i + W >= bars.length) continue;
-    const m = forwardWindowMetrics(bars, i, W);
-    if (!m) continue;
-    const rangeOk = m.rangeFrac >= rangeThr;
-    const netOk = m.netFrac >= netThr;
-    const looseOr = process.env.NEWS_REACT_COMBINE === 'or';
-    const pass = looseOr ? rangeOk || netOk : rangeOk && netOk;
+
+    const ref = Math.max(bars[i].c, 1e-12);
+    let maxH = -Infinity;
+    let minL = Infinity;
+    let maxBarRange = 0;
+    for (let j = i + 1; j <= i + W; j++) {
+      const b = bars[j];
+      maxH = Math.max(maxH, b.h);
+      minL = Math.min(minL, b.l);
+      maxBarRange = Math.max(maxBarRange, (b.h - b.l) / ref);
+    }
+    if (!Number.isFinite(maxH) || !Number.isFinite(minL)) continue;
+    const rangeFrac = (maxH - minL) / ref;
+    const netFrac = Math.abs(bars[i + W].c - ref) / ref;
+
+    const rangeOk = rangeFrac >= MIN_POST_RANGE_FRAC;
+    const netOk = MIN_POST_NET_FRAC <= 0 || netFrac >= MIN_POST_NET_FRAC;
+    const barOk = MIN_MAX_BAR_RANGE_FRAC <= 0 || maxBarRange >= MIN_MAX_BAR_RANGE_FRAC;
+
+    let pass: boolean;
+    if (looseOr) {
+      pass = rangeOk || netOk || barOk;
+    } else {
+      pass = rangeOk && netOk && barOk;
+    }
     if (pass) out.push(it);
   }
   return out;

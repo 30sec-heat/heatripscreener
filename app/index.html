@@ -40,7 +40,7 @@
         <label class="layer-opt" title="Vol range % p99 crossover + RSI"><input type="checkbox" data-ind="vrng"> R% vol sniper</label>
         <label class="layer-opt" title="Volume bars blended in the price pane (under candles)"><input type="checkbox" data-ind="volume"> Volume (main)</label>
         <label class="layer-opt" title="Per-venue lines for OI / net L−S"><input type="checkbox" data-ind="split"> Split by venue</label>
-        <label class="layer-opt" title="Telegram: headline kept only if BTC’s next N×1m bars are in the top ~13% vs the same N-bar pattern over recent history (quantile + floor); env NEWS_REACT_QUANTILE, ABS_MIN_*, COMBINE=or. Click marker to pin tip."><input type="checkbox" data-ind="headlines"> Headlines</label>
+        <label class="layer-opt" title="Telegram: headline only if next N×1m pass fixed BTC gates (window range + net drift + one real 1m bar); server NEWS_REACT_WINDOW_MIN, MIN_RANGE, MIN_NET, MIN_BAR_RANGE, COMBINE=or. Click marker to pin tip."><input type="checkbox" data-ind="headlines"> Headlines</label>
         <label class="layer-opt" title="Mirrorly tracked traders: open positions + exits in the last 7 days"><input type="checkbox" data-ind="mirrorly"> Mirrorly</label>
         <label class="layer-opt" title="TapeSurf (Binance): thick resting liquidity — horizontal lines at top bid/ask levels per minute (~last 6h of the visible window)."><input type="checkbox" data-ind="obwalls"> OB walls</label>
       </div>
