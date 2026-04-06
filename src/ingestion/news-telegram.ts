@@ -12,6 +12,11 @@ const REACT_MIN_RANGE = Math.max(
   0.0005,
   Math.min(0.02, Number(process.env.NEWS_REACT_MIN_RANGE) || 0.001),
 );
+/** Min |close(N min after news) − close(headline bar)| / ref — proves price didn’t just chop in-place. */
+const REACT_MIN_NET = Math.max(
+  0,
+  Math.min(0.02, Number(process.env.NEWS_REACT_MIN_NET) || REACT_MIN_RANGE * 0.35),
+);
 const BTC_HISTORY_H = Math.max(24, Math.min(120, Number(process.env.NEWS_BTC_HISTORY_H) || 96));
 const TG_POLL_MS = Math.max(30_000, Number(process.env.TELEGRAM_NEWS_POLL_MS) || 90_000);
 /** Max headlines kept for /api/news and the chart (Telegram fetch targets this count). */
@@ -122,27 +127,38 @@ function barIndexContaining(bars: VeloBar[], tMs: number): number {
   return -1;
 }
 
-function filterNewsByBtcReaction(items: NewsItem[], bars: VeloBar[]): NewsItem[] {
-  if (!bars.length) return items;
+/**
+ * Keep a headline only if BTC moved **after** the headline minute: we anchor on the 1m bar that
+ * contains the post time, then measure only bars `i+1 … i+W` (no pre-news leakage into the tape).
+ * Require enough post-window range *and* net displacement vs headline close (configurable via env).
+ */
+function filterNewsByPostHeadlineMove(items: NewsItem[], bars: VeloBar[]): NewsItem[] {
+  if (!bars.length) return [];
   const barStep = Math.max(1, Math.round(REACT_WINDOW_MIN));
   const out: NewsItem[] = [];
   const tFirst = bars[0].t;
   const tLast = bars[bars.length - 1].t + 60_000;
   for (const it of items) {
     const tNews = it.t;
-    if (tNews < tFirst || tNews >= tLast - barStep * 60_000) continue;
+    if (tNews < tFirst || tNews >= tLast) continue;
     const i = barIndexContaining(bars, tNews);
     if (i < 0) continue;
-    if (i + barStep > bars.length) continue;
+    // Strictly *after* headline candle: need i+1 .. i+barStep inclusive
+    if (i + barStep >= bars.length) continue;
     const ref = Math.max(bars[i].c, 1e-12);
     let maxH = -Infinity;
     let minL = Infinity;
-    for (let j = i; j < i + barStep && j < bars.length; j++) {
+    for (let j = i + 1; j <= i + barStep && j < bars.length; j++) {
       maxH = Math.max(maxH, bars[j].h);
       minL = Math.min(minL, bars[j].l);
     }
+    if (!Number.isFinite(maxH) || !Number.isFinite(minL)) continue;
     const rangeFrac = (maxH - minL) / ref;
-    if (rangeFrac >= REACT_MIN_RANGE) out.push(it);
+    const endClose = bars[i + barStep].c;
+    const netFrac = Math.abs(endClose - ref) / ref;
+    const rangeOk = rangeFrac >= REACT_MIN_RANGE;
+    const netOk = REACT_MIN_NET <= 0 ? true : netFrac >= REACT_MIN_NET;
+    if (rangeOk && netOk) out.push(it);
   }
   return out;
 }
@@ -165,20 +181,6 @@ function dedupeNews(items: NewsItem[]): NewsItem[] {
     if (merged.length >= HEADLINE_CAP) break;
   }
   return merged;
-}
-
-function headlineKey(it: NewsItem): string {
-  return it.title.slice(0, 160).toLowerCase();
-}
-
-/** Prefer BTC-confirmed moves, then fill with remaining Telegram posts up to HEADLINE_CAP for chart history. */
-function mergeReactionAndHistory(merged: NewsItem[], bars: VeloBar[]): NewsItem[] {
-  if (!bars.length) return merged.slice(0, HEADLINE_CAP);
-  const reacted = filterNewsByBtcReaction(merged, bars);
-  const reactKeys = new Set(reacted.map(headlineKey));
-  const rest = merged.filter((it) => !reactKeys.has(headlineKey(it)));
-  const combined = [...reacted, ...rest].sort((a, b) => b.t - a.t);
-  return combined.slice(0, HEADLINE_CAP);
 }
 
 async function ensureTelegramClient(): Promise<TelegramClient | null> {
@@ -251,9 +253,10 @@ async function refreshLoop(): Promise<void> {
       if (merged.length) {
         try {
           const btc = await loadBtc1mRecent();
-          cache = mergeReactionAndHistory(merged, btc);
+          const passed = filterNewsByPostHeadlineMove(merged, btc);
+          cache = passed.sort((a, b) => b.t - a.t).slice(0, HEADLINE_CAP);
         } catch {
-          cache = merged.slice(0, HEADLINE_CAP);
+          cache = [];
         }
       } else {
         cache = [];
