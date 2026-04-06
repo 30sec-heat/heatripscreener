@@ -7,6 +7,18 @@ export type SlimTicker = {
 
 const UA = { 'User-Agent': 'heat.rip-markets/1 (+https://heat.rip)' };
 
+const FETCH_MS = Math.max(5000, Number(process.env.BINANCE_FETCH_TIMEOUT_MS) || 25_000);
+
+async function fetchBinance(url: string): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), FETCH_MS);
+  try {
+    return await fetch(url, { headers: UA, signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function slimTickerRow(t: {
   symbol: string;
   lastPrice?: string | number;
@@ -24,7 +36,7 @@ export function slimTickerRow(t: {
 /** All Binance USDT-M perpetuals (TRADING), merged with 24h stats; missing tickers get zeros. Sorted by quote volume desc. */
 export async function fetchPerpUsdtTickerRows(): Promise<SlimTicker[] | null> {
   try {
-    const infoR = await fetch('https://fapi.binance.com/fapi/v1/exchangeInfo', { headers: UA });
+    const infoR = await fetchBinance('https://fapi.binance.com/fapi/v1/exchangeInfo');
     const info = await infoR.json();
     if (!info?.symbols?.length) return null;
     const syms: string[] = [];
@@ -39,7 +51,7 @@ export async function fetchPerpUsdtTickerRows(): Promise<SlimTicker[] | null> {
     }
     if (syms.length === 0) return null;
 
-    const tickR = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr', { headers: UA });
+    const tickR = await fetchBinance('https://fapi.binance.com/fapi/v1/ticker/24hr');
     const tick = await tickR.json();
     if (!Array.isArray(tick)) return null;
     const map = new Map<string, any>(tick.map((t: any) => [t.symbol, t]));

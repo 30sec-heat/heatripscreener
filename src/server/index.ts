@@ -281,15 +281,14 @@ const server = http.createServer(async (req, res) => {
   catch { res.writeHead(404); res.end('Not Found'); }
 });
 
-void refreshTickers();
-startBinanceMiniTickerWs();
-startNewsTelegramPoller();
-startMirrorlyIngestion();
-
 setupWebSocket(server);
-startVeloLivePoller();
-startOIPoller(TIMEFRAMES, 60000);
 
 server.listen(SERVER_PORT, '0.0.0.0', () => {
   console.log(`[heat.rip] listening on :${SERVER_PORT}`);
+  void refreshTickers();
+  startBinanceMiniTickerWs();
+  startNewsTelegramPoller();
+  startMirrorlyIngestion();
+  startVeloLivePoller();
+  startOIPoller(TIMEFRAMES, 60000);
 });

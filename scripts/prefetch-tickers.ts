@@ -9,11 +9,21 @@ const DATA_DIR = path.resolve(__dirname, '../src/data');
 const OUT_APP = path.join(APP_DIR, 'tickers.json');
 const OUT_TS = path.join(DATA_DIR, 'bundled-tickers.gen.ts');
 
+const PREFETCH_DEADLINE_MS = Math.max(
+  8000,
+  Number(process.env.PREFETCH_TICKERS_DEADLINE_MS) || 45_000,
+);
+
 async function main() {
-  const rows = await fetchPerpUsdtTickerRows();
+  const rows = await Promise.race([
+    fetchPerpUsdtTickerRows(),
+    new Promise<null>((_, rej) =>
+      setTimeout(() => rej(new Error('prefetch-tickers deadline')), PREFETCH_DEADLINE_MS),
+    ),
+  ]).catch(() => null);
   if (!rows || rows.length === 0) {
     console.warn(
-      '[prefetch-tickers] Binance fetch failed or empty — leaving existing tickers.json + bundled-tickers.gen.ts unchanged (avoid shipping a short fallback list on CI).',
+      '[prefetch-tickers] Binance fetch failed, empty, or timed out — leaving existing tickers.json + bundled-tickers.gen.ts unchanged (avoid shipping a short fallback list on CI).',
     );
     return;
   }
