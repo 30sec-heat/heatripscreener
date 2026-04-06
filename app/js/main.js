@@ -165,6 +165,7 @@ const ind = {
   split: false,
   headlines: false,
   mirrorly: false,
+  obwalls: false,
 };
 const PANEL_GAP = 4;
 /** Min height for all indicator rows combined (drag OHLC vs stack divider). */
@@ -268,6 +269,15 @@ document.querySelectorAll('input[data-ind]').forEach((inp) => {
         hideMirrorlyTip();
       }
     }
+    if (kk === 'obwalls' && !ind.obwalls) {
+      tapeWallsLoadedKey = '';
+      tapeWallsSegments.length = 0;
+      tapeWallsFetchGen++;
+      if (tapeWallsDeb) {
+        clearTimeout(tapeWallsDeb);
+        tapeWallsDeb = null;
+      }
+    }
     if (kk === 'split' && ind.split) {
       exOn.delete('deribit');
       document.querySelector('[data-ex="deribit"]')?.classList.remove('on');
@@ -298,6 +308,55 @@ let sym = 'BTCUSDT';
 let newsItems = [];
 /** Headline hover targets set in draw() when Headlines is on. */
 let newsHits = [];
+/** TapeSurf OB wall segments from GET /api/tapesurf-walls (1m snapshots, Binance). */
+let tapeWallsSegments = [];
+let tapeWallsDeb = null;
+let tapeWallsFetchGen = 0;
+/** Last chart view for which we finished a fetch (avoid rescheduling every animation frame). */
+let tapeWallsLoadedKey = '';
+
+function scheduleTapeWallsFetch(shown) {
+  if (!ind.obwalls || !shown.length) {
+    tapeWallsLoadedKey = '';
+    tapeWallsSegments.length = 0;
+    tapeWallsFetchGen++;
+    if (tapeWallsDeb) {
+      clearTimeout(tapeWallsDeb);
+      tapeWallsDeb = null;
+    }
+    return;
+  }
+  const fromMs = shown[0].t;
+  const toMs = shown[shown.length - 1].t + tf * 1000;
+  const key = `${sym}|${fromMs}|${toMs}`;
+  if (key === tapeWallsLoadedKey) return;
+  if (tapeWallsDeb) clearTimeout(tapeWallsDeb);
+  tapeWallsDeb = setTimeout(() => {
+    tapeWallsDeb = null;
+    const gen = ++tapeWallsFetchGen;
+    void (async () => {
+      try {
+        const r = await fetch(
+          `/api/tapesurf-walls?symbol=${encodeURIComponent(sym)}&fromMs=${fromMs}&toMs=${toMs}`,
+          { cache: 'no-store' },
+        );
+        const j = await r.json();
+        if (gen !== tapeWallsFetchGen) return;
+        if (!ind.obwalls) return;
+        tapeWallsLoadedKey = key;
+        tapeWallsSegments = Array.isArray(j.segments) ? j.segments : [];
+        scheduleRedraw();
+      } catch (_e) {
+        if (gen === tapeWallsFetchGen && ind.obwalls) {
+          tapeWallsLoadedKey = key;
+          tapeWallsSegments = [];
+          scheduleRedraw();
+        }
+      }
+    })();
+  }, 420);
+}
+
 /** Mirrorly overlay rows from GET /api/mirrorly (server-side aggregated). */
 let mirrorlyRows = [];
 /** Hit targets for hover: filled in draw() when Mirrorly is on. Canvas coords. */
@@ -1562,6 +1621,8 @@ function draw() {
     return;
   }
 
+  scheduleTapeWallsFetch(shown);
+
   let oiPanelHud = null;
 
   if (ind.osc || ind.rev || ind.vrng) ensureOscDerived(all);
@@ -1937,6 +1998,39 @@ function draw() {
     ctx.restore();
   } else {
     mirrorlyHits.length = 0;
+  }
+
+  if (ind.obwalls && tapeWallsSegments.length) {
+    const barMs = tf * 1000;
+    const cwBar = (xRight - pL) / Math.max(1, v);
+    ctx.save();
+    ctx.lineCap = 'round';
+    for (const seg of tapeWallsSegments) {
+      if (
+        seg.t1 < shown[0].t - barMs ||
+        seg.t0 > shown[shown.length - 1].t + barMs * 2
+      )
+        continue;
+      const y = toY(seg.price);
+      if (y < pT - 4 || y > pT + ohlcH + 4) continue;
+      const tA = Math.max(seg.t0, shown[0].t);
+      const tB = Math.min(seg.t1, shown[shown.length - 1].t + barMs);
+      let x0 = mirrorlyXAt(shown, tA, toX, cwBar);
+      let x1 = mirrorlyXAt(shown, tB, toX, cwBar);
+      if (x0 == null) x0 = pL;
+      if (x1 == null) x1 = xRight;
+      x0 = Math.max(pL, Math.min(xRight, x0));
+      x1 = Math.max(pL, Math.min(xRight, x1));
+      if (x1 <= x0 + 0.25) continue;
+      ctx.strokeStyle = seg.side === 'bid' ? chartTheme.wallBid : chartTheme.wallAsk;
+      ctx.lineWidth = 1.35;
+      ctx.globalAlpha = 0.78;
+      ctx.beginPath();
+      ctx.moveTo(x0, y);
+      ctx.lineTo(x1, y);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   ctx.restore();
@@ -2369,6 +2463,13 @@ async function switchSym(s) {
   mirrorlyTipPinned = false;
   mirrorlyTipPinnedKey = '';
   hideMirrorlyTip();
+  tapeWallsLoadedKey = '';
+  tapeWallsSegments = [];
+  tapeWallsFetchGen++;
+  if (tapeWallsDeb) {
+    clearTimeout(tapeWallsDeb);
+    tapeWallsDeb = null;
+  }
   $pl.textContent = s.replace('USDT', '/USDT');
   document.title = DOC_TITLE_PAIR($pl.textContent);
   hlT(s);

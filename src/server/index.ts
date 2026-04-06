@@ -22,6 +22,7 @@ import {
   getMirrorlyForChartSymbol,
   mirrorlyProfileUrl,
 } from './mirrorly.js';
+import { fetchWallSegments } from './tapesurf-walls.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_DIR = path.resolve(__dirname, '../../app');
@@ -197,6 +198,40 @@ const server = http.createServer(async (req, res) => {
       'Cache-Control': 'public, max-age=15',
     });
     res.end(JSON.stringify({ items: getNewsItems() }));
+    return;
+  }
+
+  if (url.pathname === '/api/tapesurf-walls') {
+    const symbol = (url.searchParams.get('symbol') ?? 'BTCUSDT').toUpperCase();
+    const fromMs = parseInt(url.searchParams.get('fromMs') ?? '', 10);
+    const toMs = parseInt(url.searchParams.get('toMs') ?? '', 10);
+    const topPerSide = parseInt(url.searchParams.get('top') ?? '4', 10);
+    const minNotionalUsd = parseInt(url.searchParams.get('minUsd') ?? '350000', 10);
+
+    if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) {
+      res.writeHead(400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify({ error: 'fromMs and toMs required', segments: [] }));
+      return;
+    }
+
+    try {
+      const { segments, error } = await fetchWallSegments({
+        symbol,
+        fromMs,
+        toMs,
+        topPerSide: Number.isFinite(topPerSide) ? topPerSide : 4,
+        minNotionalUsd: Number.isFinite(minNotionalUsd) ? minNotionalUsd : 350_000,
+      });
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control': 'public, max-age=25',
+      });
+      res.end(JSON.stringify(error ? { segments, error } : { segments }));
+    } catch (e: any) {
+      res.writeHead(500, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify({ segments: [], error: e?.message ?? String(e) }));
+    }
     return;
   }
 

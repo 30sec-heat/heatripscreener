@@ -18,6 +18,7 @@
     "server": "tsx src/server/index.ts"
   },
   "dependencies": {
+    "avsc": "^5.7.9",
     "telegram": "^2.26.22",
     "tsx": "^4.19.0",
     "ws": "^8.18.0"
