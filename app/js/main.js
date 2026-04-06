@@ -1021,6 +1021,62 @@ function zoomVis(v) {
   scheduleSaveUiConfig();
 }
 
+/**
+ * Change visible bar count while keeping the time slice under `canvasMouseX` stable
+ * (same plot-X fraction before/after zoom).
+ */
+function zoomVisAnchored(rawTargetVis, canvasMouseX) {
+  const all = displayAllFromExt(ext1mSeries());
+  const n = all.length;
+  const total = Math.max(1, n);
+  const newVis = Math.max(10, Math.min(total, Math.round(rawTargetVis)));
+  targetVis = Math.max(10, rawTargetVis);
+
+  if (n < 2) {
+    vis = newVis;
+    plotShiftX = 0;
+    clamp();
+    syncVisLabel();
+    updSB();
+    invalidateOISlice();
+    scheduleRedraw();
+    scheduleSaveUiConfig();
+    return;
+  }
+
+  const vis0 = Math.min(n, vis);
+  const end0 = n - scrollOff;
+  const st0 = Math.max(0, end0 - vis0);
+
+  const cW = W - pL - pR - CHART_PAD_R;
+  if (cW <= 1) {
+    zoomVis(rawTargetVis);
+    return;
+  }
+
+  const mx = Math.max(pL, Math.min(pL + cW, canvasMouseX));
+  const pFrac = Math.max(0, Math.min(1, (mx - pL - plotShiftX) / cW));
+  const st1 = Math.round(st0 + pFrac * vis0 - pFrac * newVis);
+  const stClamped = Math.max(0, Math.min(n - newVis, st1));
+
+  vis = newVis;
+  scrollOff = n - stClamped - newVis;
+  plotShiftX = 0;
+  clamp();
+  syncVisLabel();
+  updSB();
+  invalidateOISlice();
+  scheduleRedraw();
+  if (vis >= total * 0.9 && loadedHours < 48) {
+    clearTimeout(loadMoreTimer);
+    loadMoreTimer = setTimeout(() => {
+      loadedHours = Math.min(48, loadedHours + 7);
+      loadMore();
+    }, 300);
+  }
+  scheduleSaveUiConfig();
+}
+
 /** Normalize wheel deltas to ~pixel units so LINE/PAGE devices match trackpads. */
 function wheelPixelDeltas(e) {
   let dy = e.deltaY;
@@ -1067,6 +1123,8 @@ cv.addEventListener(
     e.preventDefault();
     const { dy } = wheelPixelDeltas(e);
     if (dy === 0 && !e.shiftKey) return;
+    const r = cv.getBoundingClientRect();
+    const mx = e.clientX - r.left;
     if (e.shiftKey) {
       const step = Math.max(1, Math.round(vis * 0.05));
       const prevOff = scrollOff;
@@ -1082,7 +1140,7 @@ cv.addEventListener(
       if (dir === 0) return;
       const mag = Math.min(8, Math.max(1, Math.round(Math.abs(dy) / 48)));
       const step = Math.max(2, Math.round(vis * 0.08));
-      zoomVis(vis + dir * step * mag);
+      zoomVisAnchored(vis + dir * step * mag, mx);
     }
   },
   { passive: false }
