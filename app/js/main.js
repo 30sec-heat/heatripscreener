@@ -1583,21 +1583,16 @@ function draw() {
   hi += mg;
   lo -= mg;
   const pRn = hi - lo;
-  const volGutter =
-    ind.volume && ohlcH > 36
-      ? Math.min(ohlcH - 28, Math.max(12, ohlcH * 0.26))
-      : 0;
-  const priceOhlcH = ohlcH - volGutter;
   const cW = xRight - pL;
   const cw = cW / v;
   const bW = Math.max(1, Math.min(cw * 0.78, 15.5));
   const wkW = Math.max(1.2, Math.min(bW * 0.19, 2.35));
   const toX = (i) => pL + i * cw + cw / 2 + plotShiftX;
-  const toY = (p) => pT + (1 - (p - lo) / pRn) * priceOhlcH;
+  const toY = (p) => pT + (1 - (p - lo) / pRn) * ohlcH;
 
-  drawHorizontalGridBands(ctx, pL, xRight, pT, priceOhlcH, 4);
+  drawHorizontalGridBands(ctx, pL, xRight, pT, ohlcH, 4);
   for (let i = 0; i <= 4; i++) {
-    const y = pT + (i / 4) * priceOhlcH;
+    const y = pT + (i / 4) * ohlcH;
     ctx.fillStyle = chartTheme.gridText;
     ctx.font = "9px 'IBM Plex Mono',monospace";
     ctx.textAlign = 'left';
@@ -1627,18 +1622,18 @@ function draw() {
     ctx.fillText(lbl, toX(i), H - pB + 10);
   }
 
-  if (volGutter > 0) {
-    const volTop = pT + priceOhlcH;
-    ctx.strokeStyle = chartTheme.panelRule;
-    ctx.lineWidth = 0.5;
-    ctx.beginPath();
-    ctx.moveTo(pL, volTop + 0.5);
-    ctx.lineTo(xRight, volTop + 0.5);
-    ctx.stroke();
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(pL, pT, xRight - pL, ohlcH);
+  ctx.clip();
+
+  if (ind.volume && ohlcH > 24) {
     let mx = 0;
     for (const c of shown) mx = Math.max(mx, c.v || 0);
     if (mx > 0) {
-      const volDepth = volGutter - 3;
+      const volDepth = Math.min(Math.max(ohlcH * 0.24, 10), ohlcH * 0.4);
+      ctx.save();
+      ctx.globalAlpha = 0.38;
       for (let i = 0; i < shown.length; i++) {
         const c = shown[i];
         const x = toX(i);
@@ -1647,13 +1642,9 @@ function draw() {
         ctx.fillStyle = c.c >= c.o ? chartTheme.volBarBull : chartTheme.volBarBear;
         ctx.fillRect(x - bW / 2, pT + ohlcH - volH, bW, volH);
       }
+      ctx.restore();
     }
   }
-
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(pL, pT, xRight - pL, ohlcH);
-  ctx.clip();
 
   ctx.lineCap = 'round';
   for (let i = 0; i < shown.length; i++) {
@@ -1862,7 +1853,7 @@ function draw() {
     ctx.lineWidth = 1;
     ctx.setLineDash([2, 4]);
     const yTickTop = pT + 2;
-    const yBotLn = pT + priceOhlcH - 2;
+    const yBotLn = pT + ohlcH - 2;
     const barMs = tf * 1000;
     const tHi = shown[shown.length - 1].t + barMs * 2;
     const tLo = shown[0].t - barMs;
@@ -1896,7 +1887,7 @@ function draw() {
     const xFor = (tMs) => mirrorlyXAt(shown, tMs, toX, cw);
     const MR = 12;
     const bubGap = 5;
-    const yClampM = (y) => Math.max(pT + MR + 5, Math.min(pT + priceOhlcH - MR - 5, y));
+    const yClampM = (y) => Math.max(pT + MR + 5, Math.min(pT + ohlcH - MR - 5, y));
     ctx.save();
     ctx.globalAlpha = 0.4;
     for (const row of mirrorlyRows) {
@@ -2161,7 +2152,7 @@ function draw() {
     ohlcBottom: pT + ohlcH,
     pL,
     xRight,
-    priceOhlcH,
+    priceOhlcH: ohlcH,
     panelDividers: panelDividersY,
     indBody,
     subsLen: subs.length,
