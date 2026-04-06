@@ -6,13 +6,41 @@ import { cumNetLS, cumNetLSMulti } from './net-ls.js';
 import {
   computeSniper,
   computeReversionScreener,
-  computeOscCrossP95Arrows,
   computeVolRangeSniper,
 } from './sniper.js';
 import { drawLine, drawOiCandlesPanel, linePanelScale, staggerEndLabelYs } from './draw.js';
-import { computeOscillator, rollingOscQuantile } from './oscillator.js';
-import { computeRSI } from './rsi.js';
 import { aggregateOHLCVFrom1m, downsampleCumToTf, aggregatePerExOiToTf } from './timeframe.js';
+import { drawVerticalGrid, drawHorizontalGridBands } from './chart-grid.js';
+import { mirrorlyXAt, TIME_X_EXTRAP_BARS } from './chart-time-x.js';
+import { mirrorlyBarForTime, mirrorlyPriceAtTime } from './mirrorly-geometry.js';
+import {
+  registerMirrorlyRedraw,
+  loadExchangeLogoManifest,
+  drawMirrorlyExchangeDisc,
+  mirrorlySidJit,
+  pickMirrorlyHit,
+  mirrorlyHitKey,
+  showMirrorlyTip,
+  hideMirrorlyTip,
+} from './mirrorly-ui.js';
+import {
+  newsItems,
+  newsHits,
+  newsHitKey,
+  pickNewsHit,
+  showNewsTip,
+  hideNewsTip,
+  fetchNews,
+  clearNewsForToggle,
+  registerNewsRedraw,
+} from './news-ui.js';
+import {
+  oscCache,
+  ensureOscDerived,
+  invalidateOscDerived,
+  drawOscPanel,
+  drawPctArrows,
+} from './chart-osc-panel.js';
 
 const cv = document.getElementById('cv');
 const ctx = cv.getContext('2d', { alpha: false, colorSpace: 'srgb' });
@@ -26,6 +54,9 @@ function scheduleRedraw() {
     draw();
   });
 }
+
+registerMirrorlyRedraw(scheduleRedraw);
+registerNewsRedraw(scheduleRedraw);
 
 /** WS tick updates can flood 50+/s; cap redraws for live price / forming candle. */
 let liveRedrawTimer = null;
@@ -107,43 +138,6 @@ function toggleTheme() {
   scheduleRedraw();
 }
 
-const V_GRID_DIVS = 8;
-
-function drawVerticalGrid(ctx, pL, xRight, yTop, yBot) {
-  for (let g = 1; g < V_GRID_DIVS; g++) {
-    const gx = pL + (g / V_GRID_DIVS) * (xRight - pL);
-    const strong = g % 2 === 0;
-    ctx.strokeStyle = strong ? chartTheme.grid : chartTheme.gridMinor;
-    ctx.lineWidth = strong ? 1 : 0.55;
-    ctx.beginPath();
-    ctx.moveTo(gx, yTop);
-    ctx.lineTo(gx, yBot);
-    ctx.stroke();
-  }
-}
-
-function drawHorizontalGridBands(ctx, pL, xRight, yTop, height, nMajor) {
-  if (height <= 0) return;
-  const n = Math.max(2, Math.min(4, nMajor | 0));
-  for (let i = 0; i <= n; i++) {
-    const y = yTop + (i / n) * height;
-    ctx.strokeStyle = chartTheme.grid;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(pL, y);
-    ctx.lineTo(xRight, y);
-    ctx.stroke();
-  }
-  for (let i = 0; i < n; i++) {
-    const y = yTop + ((i + 0.5) / n) * height;
-    ctx.strokeStyle = chartTheme.gridMinor;
-    ctx.lineWidth = 0.55;
-    ctx.beginPath();
-    ctx.moveTo(pL, y);
-    ctx.lineTo(xRight, y);
-    ctx.stroke();
-  }
-}
 window.addEventListener(
   'scroll',
   () => {
@@ -182,7 +176,6 @@ const PRICE_ZOOM_SENS = 0.0065;
 let panelFracs = [];
 let lastLayout = null;
 let resizeDrag = null;
-const oscCache = { k: '', arr: [], p95: [], rsi: [], oscCrossSig: [] };
 const exOn = new Set(['binance-futures', 'bybit', 'okex-swap', 'deribit', 'hyperliquid']);
 const KNOWN_EX = ['binance-futures', 'bybit', 'okex-swap', 'deribit', 'hyperliquid'];
 
@@ -245,10 +238,6 @@ function invalidateOISlice() {
   vrngCache.k = '';
 }
 
-function invalidateOscDerived() {
-  oscCache.k = '';
-}
-
 function invalidateOICaches() {
   invalidateOISlice();
   invalidateOscDerived();
@@ -259,10 +248,9 @@ document.querySelectorAll('input[data-ind]').forEach((inp) => {
     const kk = inp.dataset.ind;
     ind[kk] = inp.checked;
     if (kk === 'headlines') {
-      if (ind.headlines) void fetchNews();
+      if (ind.headlines) void fetchNews(ind.headlines);
       else {
-        newsItems = [];
-        newsHits.length = 0;
+        clearNewsForToggle();
         newsTipPinned = false;
         newsTipPinnedKey = '';
         hideNewsTip();
@@ -312,10 +300,6 @@ document.querySelectorAll('[data-ex]').forEach((b) => {
 let chartHistoryLoaded = false;
 
 let sym = 'BTCUSDT';
-/** Telegram-sourced headlines from GET /api/news. */
-let newsItems = [];
-/** Headline hover targets set in draw() when Headlines is on. */
-let newsHits = [];
 /** TapeSurf OB wall segments from GET /api/tapesurf-walls (1m snapshots, Binance). */
 let tapeWallsSegments = [];
 let tapeWallsDeb = null;
@@ -420,33 +404,6 @@ function displayBarCount() {
   return displayAllFromExt(ext1mSeries()).length;
 }
 
-/** Max bar widths to extrapolate time→x before first / after last candle (walls, headlines, mirrorly). */
-const TIME_X_EXTRAP_BARS = 2.5;
-
-/** Map wall time to x in the visible slice (bar-open alignment + extrapolate past last close). */
-function mirrorlyXAt(shown, tMs, toX, cw) {
-  if (!shown.length || tMs == null || Number.isNaN(tMs)) return null;
-  const last = shown[shown.length - 1];
-  const barMs = tf * 1000;
-  const first = shown[0];
-  if (tMs < first.t) {
-    const frac = Math.max(-TIME_X_EXTRAP_BARS, (tMs - first.t) / barMs);
-    return toX(0) + frac * cw;
-  }
-  for (let i = 0; i < shown.length - 1; i++) {
-    if (shown[i].t <= tMs && tMs < shown[i + 1].t) {
-      const den = shown[i + 1].t - shown[i].t || 1;
-      const frac = (tMs - shown[i].t) / den;
-      return toX(i) + frac * (toX(i + 1) - toX(i));
-    }
-  }
-  if (tMs >= last.t) {
-    const frac = Math.min(TIME_X_EXTRAP_BARS, (tMs - last.t) / barMs);
-    return toX(shown.length - 1) + frac * cw;
-  }
-  return toX(shown.length - 1);
-}
-
 async function refreshMirrorly() {
   if (!ind.mirrorly) return;
   void loadExchangeLogoManifest();
@@ -459,440 +416,6 @@ async function refreshMirrorly() {
   } catch (_e) {
     /* ignore */
   }
-}
-
-function mirrorlyExAbbrev(ref) {
-  if (!ref) return '—';
-  const k = ref.replace(/\s+/g, '').toLowerCase();
-  const map = {
-    hyperliquid: 'HL',
-    bybit: 'By',
-    binance: 'BN',
-    okx: 'OK',
-    deribit: 'Dr',
-    bitget: 'BG',
-    blofin: 'Bl',
-  };
-  if (map[k]) return map[k];
-  const alnum = ref.replace(/[^a-zA-Z0-9]/g, '');
-  if (alnum.length >= 2) return alnum.slice(0, 2).toUpperCase();
-  return ref.slice(0, 2).toUpperCase();
-}
-
-function mirrorlyPriceAtTime(shown, tMs) {
-  if (!shown.length) return null;
-  if (tMs < shown[0].t) return shown[0].c;
-  for (let i = 0; i < shown.length - 1; i++) {
-    if (shown[i].t <= tMs && tMs < shown[i + 1].t) return shown[i].c;
-  }
-  return shown[shown.length - 1].c;
-}
-
-/** Candle whose interval contains tMs (for anchoring markers below the wick low). */
-function mirrorlyBarForTime(shown, tMs) {
-  if (!shown.length || tMs < shown[0].t) return null;
-  const last = shown[shown.length - 1];
-  const barMs = tf * 1000;
-  for (let i = 0; i < shown.length; i++) {
-    const b = shown[i];
-    const nextT = i + 1 < shown.length ? shown[i + 1].t : b.t + barMs;
-    if (b.t <= tMs && tMs < nextT) return b;
-  }
-  if (tMs >= last.t) return last;
-  return null;
-}
-
-function newsHitKey(h) {
-  if (!h) return '';
-  return `${h.t}:${(h.title || '').slice(0, 120)}`;
-}
-
-function pickNewsHit(mx, my) {
-  if (!ind.headlines || !lastLayout) return null;
-  const otop = lastLayout.ohlcTop + 2;
-  const obot = lastLayout.ohlcBottom - 2;
-  if (my < otop || my > obot || mx < lastLayout.pL || mx > lastLayout.xRight) return null;
-  let best = null;
-  let bestD = 10;
-  for (const h of newsHits) {
-    const d = Math.abs(mx - h.x);
-    if (d < bestD) {
-      bestD = d;
-      best = h;
-    }
-  }
-  return best;
-}
-
-function newsTipEl() {
-  return document.getElementById('news-tip');
-}
-
-function showNewsTip(title, url, macro, clientX, clientY) {
-  const tip = newsTipEl();
-  if (!tip) return;
-  tip.hidden = false;
-  tip.replaceChildren();
-  const card = document.createElement('div');
-  card.className = 'mirrorly-tip-card';
-  const head = document.createElement('div');
-  head.className = 'mirrorly-tip-mark';
-  head.textContent = macro ? 'Macro · BTC tape' : 'Headline';
-  const tEl = document.createElement('div');
-  tEl.className = 'mirrorly-tip-name';
-  tEl.style.marginTop = '6px';
-  tEl.textContent = title;
-  card.append(head, tEl);
-  if (url) {
-    const a = document.createElement('a');
-    a.className = 'mirrorly-tip-link';
-    a.href = url;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    a.textContent = 'Open link';
-    card.appendChild(a);
-  }
-  tip.appendChild(card);
-  const pad = 12;
-  const tw = 360;
-  let left = clientX + 16;
-  let top = clientY + 16;
-  left = Math.max(pad, Math.min(left, window.innerWidth - tw - pad));
-  top = Math.max(pad, Math.min(top, window.innerHeight - 240));
-  tip.style.left = `${left}px`;
-  tip.style.top = `${top}px`;
-  tip.style.width = `${tw}px`;
-}
-
-function hideNewsTip() {
-  const tip = newsTipEl();
-  if (tip) tip.hidden = true;
-}
-
-async function fetchNews() {
-  if (!ind.headlines) return;
-  try {
-    const r = await fetch('/api/news', { cache: 'no-store' });
-    if (!r.ok) return;
-    const j = await r.json();
-    newsItems = Array.isArray(j.items) ? j.items : [];
-    scheduleRedraw();
-  } catch (_e) {
-    /* ignore */
-  }
-}
-
-let exchangeLogoManifest = null;
-let exchangeLogoManifestPromise = null;
-
-function loadExchangeLogoManifest() {
-  if (exchangeLogoManifest) return Promise.resolve(exchangeLogoManifest);
-  if (!exchangeLogoManifestPromise) {
-    exchangeLogoManifestPromise = fetch('/exchange-logos/manifest.json')
-      .then((r) => (r.ok ? r.json() : {}))
-      .then((j) => {
-        exchangeLogoManifest = j && typeof j === 'object' ? j : {};
-        scheduleRedraw();
-        return exchangeLogoManifest;
-      })
-      .catch(() => {
-        exchangeLogoManifest = {};
-        return exchangeLogoManifest;
-      });
-  }
-  return exchangeLogoManifestPromise;
-}
-
-function mirrorlyExchangeSlug(ref) {
-  const raw = String(ref || '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, '');
-  const table = {
-    binance: 'binance',
-    binancefutures: 'binance',
-    binanceus: 'binance',
-    hyperliquid: 'hyperliquid',
-    hl: 'hyperliquid',
-    bybit: 'bybit',
-    okx: 'okx',
-    okex: 'okx',
-    deribit: 'deribit',
-    bitget: 'bitget',
-    blofin: 'blofin',
-    gate: 'gate',
-    gateio: 'gate',
-    mexc: 'mexc',
-    kucoin: 'kucoin',
-    coinbase: 'coinbase',
-    kraken: 'kraken',
-  };
-  if (table[raw]) return table[raw];
-  if (raw.includes('binance')) return 'binance';
-  if (raw.includes('hyperliquid')) return 'hyperliquid';
-  if (raw.includes('bybit')) return 'bybit';
-  if (raw.includes('okx') || raw.includes('okex')) return 'okx';
-  if (raw.includes('deribit')) return 'deribit';
-  if (raw.includes('bitget')) return 'bitget';
-  if (raw.includes('gate')) return 'gate';
-  if (raw.includes('mexc')) return 'mexc';
-  if (raw.includes('kucoin')) return 'kucoin';
-  if (raw.includes('blofin')) return 'blofin';
-  const slug = raw.replace(/[^a-z0-9]/g, '');
-  return slug || 'unknown';
-}
-
-function mirrorlyLogoUrlForSlug(slug) {
-  if (!slug || slug === 'unknown') return null;
-  const f = exchangeLogoManifest && exchangeLogoManifest[slug];
-  return f ? `/exchange-logos/${f}` : null;
-}
-
-const mirrorlyLogoImgCache = new Map();
-
-function getMirrorlyLogoImg(slug) {
-  const url = mirrorlyLogoUrlForSlug(slug);
-  if (!url) return null;
-  let rec = mirrorlyLogoImgCache.get(slug);
-  if (rec === 'err') return null;
-  if (rec instanceof Image && rec.complete && rec.naturalWidth) return rec;
-  if (!rec) {
-    const img = new Image();
-    img.decoding = 'async';
-    img.onload = () => scheduleRedraw();
-    img.onerror = () => {
-      mirrorlyLogoImgCache.set(slug, 'err');
-      scheduleRedraw();
-    };
-    img.src = url;
-    mirrorlyLogoImgCache.set(slug, img);
-    return null;
-  }
-  return null;
-}
-
-function mirrorlyExchangeBrand(ref) {
-  const slug = mirrorlyExchangeSlug(ref);
-  const map = {
-    hyperliquid: { bg: '#152028', fg: '#5eead4', ring: '#34d399' },
-    bybit: { bg: '#26150c', fg: '#ffb020', ring: '#ff8a3d' },
-    binance: { bg: '#221c08', fg: '#f0b90b', ring: '#e8c547' },
-    okx: { bg: '#10161c', fg: '#e8eaed', ring: '#ffffff' },
-    deribit: { bg: '#1a1530', fg: '#c4b5fd', ring: '#a78bfa' },
-    bitget: { bg: '#140f22', fg: '#22d3ee', ring: '#06b6d4' },
-    blofin: { bg: '#121820', fg: '#93c5fd', ring: '#60a5fa' },
-    gate: { bg: '#141a22', fg: '#4fc3f7', ring: '#29b6f6' },
-    mexc: { bg: '#162018', fg: '#7ee787', ring: '#47d96a' },
-    kucoin: { bg: '#181420', fg: '#9fa8ff', ring: '#7c83ff' },
-    coinbase: { bg: '#161420', fg: '#a78bfa', ring: '#8b5cf6' },
-    kraken: { bg: '#121824', fg: '#7dd3fc', ring: '#38bdf8' },
-  };
-  const label = mirrorlyExAbbrev(ref);
-  if (map[slug]) return { ...map[slug], label };
-  return {
-    bg: chartTheme.mirrorlyIconFallbackBg,
-    fg: chartTheme.mirrorlyIconFallbackFg,
-    ring: chartTheme.mirrorlyIconFallbackRing,
-    label,
-  };
-}
-
-/** Small exchange disc (~24px) + optional logo; opacity from caller ctx.globalAlpha. */
-function drawMirrorlyExchangeDisc(ctx, cx, cy, exchangeRef, sideTint, isExit, R) {
-  const slug = mirrorlyExchangeSlug(exchangeRef);
-  const img = getMirrorlyLogoImg(slug);
-  const brand = mirrorlyExchangeBrand(exchangeRef);
-  const ringCol = isExit ? chartTheme.mirrorlyExit : sideTint || brand.ring;
-  ctx.beginPath();
-  ctx.arc(cx, cy, R, 0, Math.PI * 2);
-  ctx.fillStyle = brand.bg;
-  ctx.fill();
-  if (img) {
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(cx, cy, Math.max(1, R - 1.25), 0, Math.PI * 2);
-    ctx.clip();
-    const pad = 1.5;
-    const iw = img.naturalWidth;
-    const ih = img.naturalHeight;
-    const scale = Math.min((2 * (R - pad)) / iw, (2 * (R - pad)) / ih);
-    const dw = iw * scale;
-    const dh = ih * scale;
-    ctx.drawImage(img, cx - dw / 2, cy - dh / 2, dw, dh);
-    ctx.restore();
-  } else {
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = brand.fg;
-    ctx.font = `800 ${Math.max(6, Math.round(R * 0.55))}px 'DM Sans', 'IBM Plex Mono', sans-serif`;
-    ctx.fillText(brand.label, cx, cy + 0.5);
-  }
-  ctx.strokeStyle = ringCol;
-  ctx.lineWidth = isExit ? 1.35 : 1.6;
-  ctx.beginPath();
-  ctx.arc(cx, cy, R, 0, Math.PI * 2);
-  if (isExit) {
-    ctx.setLineDash([3, 2]);
-    ctx.stroke();
-    ctx.setLineDash([]);
-  } else ctx.stroke();
-}
-
-function mirrorlySidJit(key, salt) {
-  let h = 0;
-  const s = String(key) + String(salt);
-  for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
-  return (Math.abs(h) % 6) * 2;
-}
-
-function pickMirrorlyHit(mx, my) {
-  const rad = 18;
-  let best = null;
-  let bestD = rad;
-  for (const h of mirrorlyHits) {
-    const d = Math.hypot(mx - h.cx, my - h.cy);
-    if (d <= bestD) {
-      bestD = d;
-      best = h;
-    }
-  }
-  return best;
-}
-
-function mirrorlyHitKey(h) {
-  if (!h?.row) return '';
-  return `${h.row.positionId || ''}:${h.kind}`;
-}
-
-function mirrorlyTipEl() {
-  return document.getElementById('mirrorly-tip');
-}
-
-function mirrorlyFmtUsd(n) {
-  const x = Number(n);
-  if (n == null || !Number.isFinite(x) || x <= 0) return '—';
-  if (x >= 1e9) return '$' + (x / 1e9).toFixed(2) + 'B';
-  if (x >= 1e6) return '$' + (x / 1e6).toFixed(2) + 'M';
-  if (x >= 1e5) return '$' + (x / 1e3).toFixed(0) + 'K';
-  if (x >= 1e3) return '$' + (x / 1e3).toFixed(1) + 'K';
-  return '$' + x.toFixed(0);
-}
-
-function showMirrorlyTip(row, kind, clientX, clientY) {
-  const tip = mirrorlyTipEl();
-  if (!tip) return;
-  tip.hidden = false;
-  tip.replaceChildren();
-  const notional = row.notionalUsd ?? row.positionSize;
-  const brand = mirrorlyExchangeBrand(row.exchangeRef);
-
-  const card = document.createElement('div');
-  card.className = 'mirrorly-tip-card';
-
-  const head = document.createElement('div');
-  head.className = 'mirrorly-tip-head';
-  const icon = document.createElement('div');
-  icon.className = 'mirrorly-tip-exicon';
-  icon.style.background = brand.bg;
-  icon.style.color = brand.fg;
-  icon.style.setProperty('--mirrorly-ring', brand.ring);
-  const logoTip = mirrorlyLogoUrlForSlug(mirrorlyExchangeSlug(row.exchangeRef));
-  if (logoTip) {
-    const im = document.createElement('img');
-    im.className = 'mirrorly-tip-exicon-img';
-    im.src = logoTip;
-    im.alt = '';
-    icon.appendChild(im);
-  } else icon.textContent = mirrorlyExAbbrev(row.exchangeRef);
-
-  const headText = document.createElement('div');
-  headText.className = 'mirrorly-tip-headtext';
-  const nameEl = document.createElement('div');
-  nameEl.className = 'mirrorly-tip-name';
-  nameEl.textContent = row.name || 'Trader';
-  const exEl = document.createElement('div');
-  exEl.className = 'mirrorly-tip-exchange';
-  exEl.textContent = row.exchangeRef ? `${row.exchangeRef} · ${row.symbol || ''}` : row.symbol || '';
-  headText.append(nameEl, exEl);
-
-  const sidePill = document.createElement('span');
-  const short = row.side === 'short';
-  sidePill.className = 'mirrorly-tip-side ' + (short ? 'mirrorly-tip-side-short' : 'mirrorly-tip-side-long');
-  sidePill.textContent = short ? 'Short' : 'Long';
-  head.append(icon, headText, sidePill);
-
-  const mark = document.createElement('div');
-  mark.className = 'mirrorly-tip-mark';
-  mark.textContent = kind === 'exit' ? 'Exit marker' : 'Entry marker';
-
-  const stats = document.createElement('dl');
-  stats.className = 'mirrorly-tip-stats';
-
-  const addStat = (label, value) => {
-    const dt = document.createElement('dt');
-    dt.textContent = label;
-    const dd = document.createElement('dd');
-    dd.textContent = value;
-    stats.append(dt, dd);
-  };
-
-  const firstPx =
-    row.firstEntryPrice != null && Number.isFinite(Number(row.firstEntryPrice))
-      ? Number(row.firstEntryPrice)
-      : null;
-  const avgPx = row.entryPrice > 0 ? row.entryPrice : null;
-  if (firstPx != null && avgPx != null && Math.abs(firstPx - avgPx) > avgPx * 1e-6) {
-    addStat('First fill', fP(firstPx));
-    addStat('Avg entry', fP(avgPx));
-  } else if (avgPx != null) {
-    addStat('Avg entry', fP(avgPx));
-  } else if (firstPx != null) {
-    addStat('Entry', fP(firstPx));
-  }
-
-  if (kind === 'exit') {
-    const exP = row.exitPrice != null && Number.isFinite(Number(row.exitPrice)) ? Number(row.exitPrice) : null;
-    if (exP != null) addStat('Exit price', fP(exP));
-  }
-
-  addStat('Notional (USD)', mirrorlyFmtUsd(notional));
-
-  const open = !row.closed;
-  const pnlN = open ? row.unrealizedPnl : row.realizedPnl;
-  const pnlOk = pnlN != null && Number.isFinite(Number(pnlN));
-  const pnlRow = document.createElement('div');
-  pnlRow.className = 'mirrorly-tip-pnl ' + (pnlOk && Number(pnlN) > 0 ? 'mirrorly-tip-pnl-pos' : pnlOk && Number(pnlN) < 0 ? 'mirrorly-tip-pnl-neg' : '');
-  const pnlLab = document.createElement('span');
-  pnlLab.className = 'mirrorly-tip-pnl-label';
-  pnlLab.textContent = open ? 'Open uPnL' : 'Realized PnL';
-  const pnlVal = document.createElement('span');
-  pnlVal.className = 'mirrorly-tip-pnl-val';
-  pnlVal.textContent = pnlOk ? fSignedN(Number(pnlN)) : '—';
-  pnlRow.append(pnlLab, pnlVal);
-
-  const a = document.createElement('a');
-  a.className = 'mirrorly-tip-link';
-  a.href = row.profileUrl || 'https://portal.mirrorly.xyz/';
-  a.target = '_blank';
-  a.rel = 'noopener noreferrer';
-  a.textContent = 'Mirrorly profile';
-
-  card.append(head, mark, stats, pnlRow, a);
-  tip.appendChild(card);
-
-  const pad = 12;
-  const tw = 340;
-  let left = clientX + 16;
-  let top = clientY + 16;
-  left = Math.max(pad, Math.min(left, window.innerWidth - tw - pad));
-  top = Math.max(pad, Math.min(top, window.innerHeight - 280));
-  tip.style.left = `${left}px`;
-  tip.style.top = `${top}px`;
-}
-
-function hideMirrorlyTip() {
-  const tip = mirrorlyTipEl();
-  if (tip) tip.hidden = true;
 }
 
 function setTf(sec) {
@@ -1217,7 +740,7 @@ cv.addEventListener('mousedown', (e) => {
       mx <= lastLayout.xRight &&
       my >= otop + 2 &&
       my <= lastLayout.ohlcBottom - 2;
-    const mh = overOhlc ? pickMirrorlyHit(mx, my) : null;
+    const mh = overOhlc ? pickMirrorlyHit(mx, my, mirrorlyHits) : null;
     if (mh) {
       const k = mirrorlyHitKey(mh);
       if (mirrorlyTipPinned && mirrorlyTipPinnedKey === k) {
@@ -1244,7 +767,7 @@ cv.addEventListener('mousedown', (e) => {
       mx <= lastLayout.xRight &&
       my >= otop + 2 &&
       my <= lastLayout.ohlcBottom - 2;
-    const nhDown = overOhlcNews ? pickNewsHit(mx, my) : null;
+    const nhDown = overOhlcNews ? pickNewsHit(mx, my, ind.headlines, lastLayout) : null;
     if (nhDown) {
       const nk = newsHitKey(nhDown);
       if (newsTipPinned && newsTipPinnedKey === nk) {
@@ -1417,7 +940,7 @@ window.addEventListener('mousemove', (e) => {
       mouseX <= lastLayout.xRight &&
       my >= mlOhlcTop + 2 &&
       my <= lastLayout.ohlcBottom - 2 &&
-      pickMirrorlyHit(mouseX, mouseY);
+      pickMirrorlyHit(mouseX, mouseY, mirrorlyHits);
     const nhNear =
       ind.headlines &&
       lastLayout?.pL != null &&
@@ -1425,7 +948,7 @@ window.addEventListener('mousemove', (e) => {
       mouseX <= lastLayout.xRight &&
       my >= mlOhlcTop + 2 &&
       my <= lastLayout.ohlcBottom - 2 &&
-      pickNewsHit(mouseX, my);
+      pickNewsHit(mouseX, my, ind.headlines, lastLayout);
     if (lastLayout?.subsLen) {
       if (Math.abs(my - lastLayout.ohlcBottom) < 6) cv.style.cursor = 'ns-resize';
       else if (lastLayout.panelDividers.some((y) => Math.abs(my - y) < 5)) cv.style.cursor = 'ns-resize';
@@ -1469,11 +992,11 @@ window.addEventListener('mousemove', (e) => {
     const overNewsTip = e.target?.closest?.('#news-tip');
     const mh =
       overOhlc && !isDrag && !resizeDrag && !plotShiftDrag && !priceZoomDrag
-        ? pickMirrorlyHit(mouseX, mouseY)
+        ? pickMirrorlyHit(mouseX, mouseY, mirrorlyHits)
         : null;
     const nh =
       ind.headlines && overOhlc && !isDrag && !resizeDrag && !plotShiftDrag && !priceZoomDrag && !mh
-        ? pickNewsHit(mouseX, my2)
+        ? pickNewsHit(mouseX, my2, ind.headlines, lastLayout)
         : null;
     if (!mirrorlyTipPinned) {
       if (overTip) {
@@ -1505,7 +1028,7 @@ window.addEventListener('mousemove', (e) => {
         my3 <= lastLayout.ohlcBottom - 2;
       const overNewsTip = e.target?.closest?.('#news-tip');
       if (overOhlc && !isDrag && !resizeDrag && !plotShiftDrag && !priceZoomDrag) {
-        const nh = pickNewsHit(mouseX, my3);
+        const nh = pickNewsHit(mouseX, my3, ind.headlines, lastLayout);
         if (overNewsTip) {
           /* keep */
         } else if (nh) {
@@ -1649,129 +1172,6 @@ const pL = 4;
 const pT = 6;
 const pB = 18;
 
-function ensureOscDerived(all) {
-  const k = all.length + ':' + tf + ':' + (all[all.length - 1]?.t ?? 0);
-  if (k === oscCache.k) return;
-  oscCache.k = k;
-  oscCache.arr = computeOscillator(all, 100, 14);
-  oscCache.p95 = rollingOscQuantile(oscCache.arr, 1000, 0.95);
-  oscCache.rsi = computeRSI(all, 14);
-  oscCache.oscCrossSig = computeOscCrossP95Arrows(
-    oscCache.arr,
-    oscCache.p95,
-    oscCache.rsi
-  );
-}
-
-function drawOscPanel(ctx, vals, p95Vals, dT, pH, pL, xRight, toX, lineFill = null) {
-  const lineC = lineFill?.line ?? chartTheme.oscLine;
-  const fillC = lineFill?.fill ?? chartTheme.oscFill;
-  const lo = 1;
-  const hi = 100;
-  const toYv = (v) => {
-    if (typeof v !== 'number' || Number.isNaN(v)) return dT + pH * 0.5;
-    const t = (Math.min(hi, Math.max(lo, v)) - lo) / (hi - lo);
-    return dT + pH - t * pH;
-  };
-  ctx.strokeStyle = chartTheme.oscMid;
-  ctx.lineWidth = 0.5;
-  for (const pv of [25, 50, 75]) {
-    const y = toYv(pv);
-    ctx.beginPath();
-    ctx.moveTo(pL, y);
-    ctx.lineTo(xRight, y);
-    ctx.stroke();
-  }
-  const pts = [];
-  for (let i = 0; i < vals.length; i++) {
-    const v = vals[i];
-    if (typeof v === 'number' && !Number.isNaN(v)) pts.push({ i, y: toYv(v) });
-  }
-  if (pts.length >= 2) {
-    ctx.beginPath();
-    ctx.moveTo(toX(pts[0].i), pts[0].y);
-    for (let k = 1; k < pts.length; k++) ctx.lineTo(toX(pts[k].i), pts[k].y);
-    ctx.strokeStyle = lineC;
-    ctx.lineWidth = 1.15;
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(toX(pts[0].i), dT + pH);
-    for (let k = 0; k < pts.length; k++) ctx.lineTo(toX(pts[k].i), pts[k].y);
-    ctx.lineTo(toX(pts[pts.length - 1].i), dT + pH);
-    ctx.closePath();
-    ctx.fillStyle = fillC;
-    ctx.fill();
-  }
-
-  if (p95Vals && p95Vals.length === vals.length) {
-    ctx.beginPath();
-    let started = false;
-    for (let i = 0; i < vals.length; i++) {
-      const pv = p95Vals[i];
-      if (typeof pv !== 'number' || Number.isNaN(pv)) {
-        started = false;
-        continue;
-      }
-      const x = toX(i);
-      const y = toYv(pv);
-      if (!started) {
-        ctx.moveTo(x, y);
-        started = true;
-      } else ctx.lineTo(x, y);
-    }
-    if (started) {
-      ctx.strokeStyle = chartTheme.oscP95;
-      ctx.lineWidth = 1;
-      ctx.setLineDash([4, 3]);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-  }
-}
-
-function drawPctArrows(ctx, shown, st, toX, toY) {
-  const crossSig = oscCache.oscCrossSig;
-  if (!crossSig.length) return;
-  const h = 6;
-  const w = 5;
-  const off = 11;
-  const sw = chartTheme.rsiArrowStrokeW;
-  for (let i = 0; i < shown.length; i++) {
-    const gi = st + i;
-    const d = crossSig[gi];
-    if (!d) continue;
-    const x = toX(i);
-    const c = shown[i];
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
-    if (d === 'long') {
-      const y = toY(c.l) + off;
-      ctx.beginPath();
-      ctx.moveTo(x, y - h);
-      ctx.lineTo(x - w, y);
-      ctx.lineTo(x + w, y);
-      ctx.closePath();
-      ctx.fillStyle = chartTheme.rsiArrowBelowFill;
-      ctx.fill();
-      ctx.strokeStyle = chartTheme.rsiArrowBelowStroke;
-      ctx.lineWidth = sw;
-      ctx.stroke();
-    } else {
-      const y = toY(c.h) - off;
-      ctx.beginPath();
-      ctx.moveTo(x, y + h);
-      ctx.lineTo(x - w, y);
-      ctx.lineTo(x + w, y);
-      ctx.closePath();
-      ctx.fillStyle = chartTheme.rsiArrowAboveFill;
-      ctx.fill();
-      ctx.strokeStyle = chartTheme.rsiArrowAboveStroke;
-      ctx.lineWidth = sw;
-      ctx.stroke();
-    }
-  }
-}
-
 function draw() {
   ctx.fillStyle = chartTheme.bg;
   ctx.fillRect(0, 0, W, H);
@@ -1832,7 +1232,7 @@ function draw() {
 
   let oiPanelHud = null;
 
-  if (ind.osc || ind.rev || ind.vrng) ensureOscDerived(all);
+  if (ind.osc || ind.rev || ind.vrng) ensureOscDerived(all, tf);
 
   const oiFull1m = getOIFull1m(ext1m);
   const oiData = tf <= 60 ? getOI(shown) : getOIDisplayTf(shown, ext1m);
@@ -2132,7 +1532,7 @@ function draw() {
       if (!Number.isFinite(tMs) || tMs < tLo || tMs > tHi) continue;
       const title = typeof it.title === 'string' ? it.title : '';
       if (!title) continue;
-      const xU = mirrorlyXAt(shown, tMs, toX, cw);
+      const xU = mirrorlyXAt(tf, shown, tMs, toX, cw);
       if (xU == null) continue;
       const x = Math.max(pL, Math.min(xRight, xU));
       ctx.beginPath();
@@ -2155,7 +1555,7 @@ function draw() {
   if (ind.mirrorly && mirrorlyRows.length) {
     mirrorlyHits.length = 0;
     const cw = (xRight - pL) / Math.max(1, v);
-    const xFor = (tMs) => mirrorlyXAt(shown, tMs, toX, cw);
+    const xFor = (tMs) => mirrorlyXAt(tf, shown, tMs, toX, cw);
     const MR = 12;
     const bubGap = 5;
     const yClampM = (y) => Math.max(pT + MR + 5, Math.min(pT + ohlcH - MR - 5, y));
@@ -2167,7 +1567,7 @@ function draw() {
       if (Number.isNaN(openMs)) continue;
       const xO = xFor(openMs);
       if (xO == null || xO < pL || xO > xRight) continue;
-      const barE = mirrorlyBarForTime(shown, openMs);
+      const barE = mirrorlyBarForTime(tf, shown, openMs);
       const yPriceE = toY(row.entryPrice);
       const yLowE = barE ? toY(barE.l) : yPriceE;
       const yE = yClampM(yLowE + MR + bubGap + mirrorlySidJit(row.positionId, 'en') * 0.35);
@@ -2187,7 +1587,7 @@ function draw() {
           if (xC != null && xC >= pL && xC <= xRight) {
             const pxC = mirrorlyPriceAtTime(shown, closeMs);
             const yPriceX = pxC != null ? toY(pxC) : yPriceE;
-            const barX = mirrorlyBarForTime(shown, closeMs);
+            const barX = mirrorlyBarForTime(tf, shown, closeMs);
             const yLowX = barX ? toY(barX.l) : yPriceX;
             let yX = yClampM(yLowX + MR + bubGap + mirrorlySidJit(row.positionId, 'ex') * 0.35);
             if (Math.abs(xO - xC) < 22 && Math.abs(yE - yX) < 12) yX = yClampM(yX + 14);
@@ -2225,8 +1625,8 @@ function draw() {
       if (y < pT - 4 || y > pT + ohlcH + 4) continue;
       const tA = Math.max(seg.t0, shown[0].t);
       const tB = Math.min(seg.t1, shown[shown.length - 1].t + barMs);
-      let x0 = mirrorlyXAt(shown, tA, toX, cwBar);
-      let x1 = mirrorlyXAt(shown, tB, toX, cwBar);
+      let x0 = mirrorlyXAt(tf, shown, tA, toX, cwBar);
+      let x1 = mirrorlyXAt(tf, shown, tB, toX, cwBar);
       if (x0 == null) x0 = pL;
       if (x1 == null) x1 = xRight;
       x0 = Math.max(pL, Math.min(xRight, x0));
@@ -2969,13 +2369,13 @@ $chartCopy?.addEventListener('click', async () => {
   }, 45_000);
   setInterval(() => {
     if (document.visibilityState !== 'visible') return;
-    if (ind.headlines) void fetchNews();
+    if (ind.headlines) void fetchNews(ind.headlines);
   }, 120_000);
-  if (ind.headlines) void fetchNews();
+  if (ind.headlines) void fetchNews(ind.headlines);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
     void fetchT();
-    if (ind.headlines) void fetchNews();
+    if (ind.headlines) void fetchNews(ind.headlines);
     refreshChartSilent();
     ensureLiveWs();
   });
