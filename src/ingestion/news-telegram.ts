@@ -12,8 +12,10 @@ const REACT_MIN_RANGE = Math.max(
   0.0005,
   Math.min(0.02, Number(process.env.NEWS_REACT_MIN_RANGE) || 0.001),
 );
-const BTC_HISTORY_H = Math.max(24, Math.min(96, Number(process.env.NEWS_BTC_HISTORY_H) || 72));
+const BTC_HISTORY_H = Math.max(24, Math.min(120, Number(process.env.NEWS_BTC_HISTORY_H) || 96));
 const TG_POLL_MS = Math.max(30_000, Number(process.env.TELEGRAM_NEWS_POLL_MS) || 90_000);
+/** Max headlines kept for /api/news and the chart (Telegram fetch targets this count). */
+const HEADLINE_CAP = Math.max(20, Math.min(100, Number(process.env.TELEGRAM_NEWS_FETCH_LIMIT) || 50));
 
 const DEFAULT_CHANNEL = '-1001263412188';
 
@@ -160,9 +162,23 @@ function dedupeNews(items: NewsItem[]): NewsItem[] {
     if (seen.has(key)) continue;
     seen.add(key);
     merged.push(it);
-    if (merged.length >= 120) break;
+    if (merged.length >= HEADLINE_CAP) break;
   }
   return merged;
+}
+
+function headlineKey(it: NewsItem): string {
+  return it.title.slice(0, 160).toLowerCase();
+}
+
+/** Prefer BTC-confirmed moves, then fill with remaining Telegram posts up to HEADLINE_CAP for chart history. */
+function mergeReactionAndHistory(merged: NewsItem[], bars: VeloBar[]): NewsItem[] {
+  if (!bars.length) return merged.slice(0, HEADLINE_CAP);
+  const reacted = filterNewsByBtcReaction(merged, bars);
+  const reactKeys = new Set(reacted.map(headlineKey));
+  const rest = merged.filter((it) => !reactKeys.has(headlineKey(it)));
+  const combined = [...reacted, ...rest].sort((a, b) => b.t - a.t);
+  return combined.slice(0, HEADLINE_CAP);
 }
 
 async function ensureTelegramClient(): Promise<TelegramClient | null> {
@@ -208,8 +224,7 @@ async function fetchChannelMessages(): Promise<NewsItem[]> {
   const c = await ensureTelegramClient();
   if (!c) return [];
   const peer = channelPeer();
-  const limit = Math.max(20, Math.min(120, Number(process.env.TELEGRAM_NEWS_FETCH_LIMIT) || 80));
-  const messages = await c.getMessages(peer, { limit });
+  const messages = await c.getMessages(peer, { limit: HEADLINE_CAP });
   const out: NewsItem[] = [];
   for (const m of messages) {
     if (!m || !(m instanceof Api.Message)) continue;
@@ -236,9 +251,9 @@ async function refreshLoop(): Promise<void> {
       if (merged.length) {
         try {
           const btc = await loadBtc1mRecent();
-          cache = filterNewsByBtcReaction(merged, btc);
+          cache = mergeReactionAndHistory(merged, btc);
         } catch {
-          cache = merged;
+          cache = merged.slice(0, HEADLINE_CAP);
         }
       } else {
         cache = [];
