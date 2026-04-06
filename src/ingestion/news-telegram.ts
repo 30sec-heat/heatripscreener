@@ -14,15 +14,18 @@ const RETENTION_MS = Math.max(
 const TG_PAGE = Math.max(20, Math.min(200, Number(process.env.TELEGRAM_NEWS_PAGE) || 100));
 const TG_MAX_PAGES = Math.max(10, Math.min(800, Number(process.env.TELEGRAM_NEWS_MAX_PAGES) || 400));
 
-const DEFAULT_CHANNEL = '-1001263412188';
+/** Public “Market News Feed” — https://t.me/marketfeed (override only via env). */
+const DEFAULT_NEWS_CHANNEL = 'marketfeed';
 
 let cache: NewsItem[] = [];
 let client: TelegramClient | null = null;
 let warnedConfig = false;
 
-function channelPeer() {
-  const raw = (process.env.TELEGRAM_NEWS_CHANNEL_ID || DEFAULT_CHANNEL).trim();
-  return bigInt(raw);
+/** Numeric id (e.g. -100…) or public @username without @. */
+function channelPeer(): string | bigInt.BigInteger {
+  const raw = (process.env.TELEGRAM_NEWS_CHANNEL_ID || DEFAULT_NEWS_CHANNEL).trim();
+  if (/^-?\d+$/.test(raw)) return bigInt(raw);
+  return raw.replace(/^@/, '');
 }
 
 function readConfig(): { apiId: number; apiHash: string; session: string } | null {
@@ -32,7 +35,7 @@ function readConfig(): { apiId: number; apiHash: string; session: string } | nul
   if (!apiId || !apiHash || !session) {
     if (!warnedConfig) {
       console.warn(
-        '[news-tg] Set TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_SESSION_STRING (Railway secrets). Optional: TELEGRAM_NEWS_CHANNEL_ID',
+        '[news-tg] Set TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_SESSION_STRING (Railway secrets). Default news source: @marketfeed; override TELEGRAM_NEWS_CHANNEL_ID only if needed.',
       );
       warnedConfig = true;
     }
@@ -131,7 +134,10 @@ function messageToItem(m: Api.Message): NewsItem | null {
  * Walk channel history backward from the latest message until we pass the retention cutoff.
  * Dedupes by Telegram message id only (same post fetched on overlapping pages).
  */
-async function fetchChannelMessagesRetained(c: TelegramClient, peer: bigInt.BigInteger): Promise<NewsItem[]> {
+async function fetchChannelMessagesRetained(
+  c: TelegramClient,
+  peer: string | bigInt.BigInteger,
+): Promise<NewsItem[]> {
   const sinceSec = Math.floor((Date.now() - RETENTION_MS) / 1000);
   const byId = new Map<number, NewsItem>();
   let offsetId = 0;
