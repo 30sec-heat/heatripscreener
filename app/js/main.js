@@ -420,12 +420,19 @@ function displayBarCount() {
   return displayAllFromExt(ext1mSeries()).length;
 }
 
+/** Max bar widths to extrapolate time→x before first / after last candle (walls, headlines, mirrorly). */
+const TIME_X_EXTRAP_BARS = 2.5;
+
 /** Map wall time to x in the visible slice (bar-open alignment + extrapolate past last close). */
 function mirrorlyXAt(shown, tMs, toX, cw) {
   if (!shown.length || tMs == null || Number.isNaN(tMs)) return null;
-  if (tMs < shown[0].t) return null;
   const last = shown[shown.length - 1];
   const barMs = tf * 1000;
+  const first = shown[0];
+  if (tMs < first.t) {
+    const frac = Math.max(-TIME_X_EXTRAP_BARS, (tMs - first.t) / barMs);
+    return toX(0) + frac * cw;
+  }
   for (let i = 0; i < shown.length - 1; i++) {
     if (shown[i].t <= tMs && tMs < shown[i + 1].t) {
       const den = shown[i + 1].t - shown[i].t || 1;
@@ -434,7 +441,7 @@ function mirrorlyXAt(shown, tMs, toX, cw) {
     }
   }
   if (tMs >= last.t) {
-    const frac = Math.min(2.5, (tMs - last.t) / barMs);
+    const frac = Math.min(TIME_X_EXTRAP_BARS, (tMs - last.t) / barMs);
     return toX(shown.length - 1) + frac * cw;
   }
   return toX(shown.length - 1);
@@ -2095,8 +2102,8 @@ function draw() {
     const yTickTop = pT + 2;
     const yBotLn = pT + ohlcH - 2;
     const barMs = tf * 1000;
-    const tHi = shown[shown.length - 1].t + barMs * 2;
-    const tLo = shown[0].t - barMs;
+    const tHi = shown[shown.length - 1].t + barMs * TIME_X_EXTRAP_BARS;
+    const tLo = shown[0].t - barMs * TIME_X_EXTRAP_BARS;
     for (const it of newsItems) {
       const tMs = Number(it.t);
       if (!Number.isFinite(tMs) || tMs < tLo || tMs > tHi) continue;
@@ -2186,8 +2193,8 @@ function draw() {
     ctx.lineCap = 'round';
     for (const seg of tapeWallsSegments) {
       if (
-        seg.t1 < shown[0].t - barMs ||
-        seg.t0 > shown[shown.length - 1].t + barMs * 2
+        seg.t1 < shown[0].t - barMs * TIME_X_EXTRAP_BARS ||
+        seg.t0 > shown[shown.length - 1].t + barMs * TIME_X_EXTRAP_BARS
       )
         continue;
       const y = toY(seg.price);
