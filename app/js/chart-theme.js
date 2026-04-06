@@ -56,8 +56,8 @@ const chartThemeDark = {
   mirrorlyIconFallbackBg: '#2b3139',
   mirrorlyIconFallbackFg: '#eaecef',
   mirrorlyIconFallbackRing: 'rgba(132, 142, 156, 0.48)',
-  newsLine: 'rgba(255, 200, 80, 0.34)',
-  newsTick: 'rgba(255, 200, 80, 0.62)',
+  newsLine: 'rgba(255, 200, 80, 0.16)',
+  newsTick: 'rgba(255, 200, 80, 0.36)',
   wallBid: 'rgba(14, 203, 129, 0.45)',
   wallAsk: 'rgba(246, 70, 93, 0.45)',
 };
@@ -119,8 +119,8 @@ const chartThemeLight = {
   mirrorlyIconFallbackBg: '#eceff1',
   mirrorlyIconFallbackFg: '#1e2329',
   mirrorlyIconFallbackRing: 'rgba(112, 122, 138, 0.35)',
-  newsLine: 'rgba(201, 120, 0, 0.32)',
-  newsTick: 'rgba(201, 120, 0, 0.58)',
+  newsLine: 'rgba(201, 120, 0, 0.14)',
+  newsTick: 'rgba(201, 120, 0, 0.34)',
   wallBid: 'rgba(10, 140, 90, 0.44)',
   wallAsk: 'rgba(200, 45, 65, 0.44)',
 };
