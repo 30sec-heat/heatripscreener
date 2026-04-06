@@ -58,6 +58,8 @@ const chartThemeDark = {
   mirrorlyIconFallbackRing: 'rgba(132, 142, 156, 0.48)',
   newsLine: 'rgba(255, 200, 80, 0.55)',
   newsTick: 'rgba(255, 200, 80, 0.85)',
+  /** RGB for orderbook heatmap (`rgba(${heatmapRgb}, α)`). */
+  heatmapRgb: '100, 200, 255',
 };
 
 const chartThemeLight = {
@@ -119,6 +121,7 @@ const chartThemeLight = {
   mirrorlyIconFallbackRing: 'rgba(112, 122, 138, 0.35)',
   newsLine: 'rgba(201, 120, 0, 0.5)',
   newsTick: 'rgba(201, 120, 0, 0.88)',
+  heatmapRgb: '30, 110, 190',
 };
 
 export let chartTheme = chartThemeDark;

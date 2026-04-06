@@ -195,6 +195,82 @@ export function linePanelScale(vals, dT, pH) {
 }
 
 /** Spread right-end labels vertically so short tickers (Bin, Byb, …) do not overlap. */
+/** Velo orderbook/limit depth heatmap over the OHLC pane (behind candles). */
+export function drawOrderbookHeatmap(
+  ctx,
+  cells,
+  rows,
+  cols,
+  prices,
+  beginMs,
+  endMs,
+  shown,
+  pL,
+  xRight,
+  pT,
+  ohlcH,
+  toY,
+  heatmapRgb,
+) {
+  if (!cells?.length || !prices?.length || rows < 1 || cols < 1 || shown.length < 2) return;
+  if (cells.length !== rows * cols) return;
+  const tVis0 = shown[0].t;
+  const tVis1 = shown[shown.length - 1].t;
+  const tSpan = tVis1 - tVis0 || 1;
+  const xOfT = (t) => pL + ((t - tVis0) / tSpan) * (xRight - pL);
+  const rowMs = (endMs - beginMs) / rows;
+
+  let pLo = prices[0];
+  let pHi = prices[prices.length - 1];
+  for (const c of shown) {
+    pLo = Math.min(pLo, c.l);
+    pHi = Math.max(pHi, c.h);
+  }
+  let j0 = 0;
+  let j1 = cols - 1;
+  while (j0 < cols && prices[j0] < pLo) j0++;
+  while (j1 > 0 && prices[j1] > pHi) j1--;
+  if (j0 > j1) return;
+  j0 = Math.max(0, j0 - 1);
+  j1 = Math.min(cols - 1, j1 + 1);
+
+  const stepUp = (j) =>
+    j + 1 < cols
+      ? prices[j + 1] - prices[j]
+      : j > 0
+        ? prices[j] - prices[j - 1]
+        : 1;
+
+  ctx.save();
+  for (let r = 0; r < rows; r++) {
+    const tA = beginMs + r * rowMs;
+    const tB = beginMs + (r + 1) * rowMs;
+    if (tB < tVis0 || tA > tVis1) continue;
+    let xL = xOfT(tA);
+    let xR = xOfT(tB);
+    if (xR < xL) [xL, xR] = [xR, xL];
+    const xa = Math.max(pL, xL);
+    const xb = Math.min(xRight, xR);
+    if (xb - xa < 0.25) continue;
+
+    for (let j = j0; j <= j1; j++) {
+      const v = cells[r * cols + j];
+      if (v < 6) continue;
+      const low = prices[j];
+      const high = low + stepUp(j);
+      const yA = toY(low);
+      const yB = toY(high);
+      const yt = Math.min(yA, yB);
+      const yb = Math.max(yA, yB);
+      if (yb < pT || yt > pT + ohlcH) continue;
+      const alpha = (v / 255) * 0.48;
+      ctx.fillStyle = `rgba(${heatmapRgb},${alpha})`;
+      ctx.fillRect(xa, yt, Math.max(xb - xa, 0.35), Math.max(yb - yt, 0.5));
+    }
+  }
+  ctx.restore();
+}
+
 export function staggerEndLabelYs(rawYs, dT, pH, gap = 9) {
   const top = dT + 8;
   const bot = dT + pH - 2;

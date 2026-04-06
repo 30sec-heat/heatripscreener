@@ -9,7 +9,13 @@ import {
   computeOscCrossP95Arrows,
   computeVolRangeSniper,
 } from './sniper.js';
-import { drawLine, drawOiCandlesPanel, linePanelScale, staggerEndLabelYs } from './draw.js';
+import {
+  drawLine,
+  drawOiCandlesPanel,
+  linePanelScale,
+  staggerEndLabelYs,
+  drawOrderbookHeatmap,
+} from './draw.js';
 import { computeOscillator, rollingOscQuantile } from './oscillator.js';
 import { computeRSI } from './rsi.js';
 import { aggregateOHLCVFrom1m, downsampleCumToTf, aggregatePerExOiToTf } from './timeframe.js';
@@ -165,6 +171,7 @@ const ind = {
   split: false,
   headlines: false,
   mirrorly: false,
+  heatmap: false,
 };
 const PANEL_GAP = 4;
 /** Min height for all indicator rows combined (drag OHLC vs stack divider). */
@@ -176,6 +183,8 @@ let panelFracs = [];
 let lastLayout = null;
 let resizeDrag = null;
 const oscCache = { k: '', arr: [], p95: [], rsi: [], oscCrossSig: [] };
+/** Velo `/api/levels` grid for OB heatmap; `k` = `${sym}:${hours}`. */
+const levelsCache = { k: '', payload: /** @type {null | { begin: number; end: number; prices: number[]; rows: number; cols: number; cells: Uint8Array }} */ (null) };
 const exOn = new Set(['binance-futures', 'bybit', 'okex-swap', 'deribit', 'hyperliquid']);
 const KNOWN_EX = ['binance-futures', 'bybit', 'okex-swap', 'deribit', 'hyperliquid'];
 
@@ -247,6 +256,59 @@ function invalidateOICaches() {
   invalidateOscDerived();
 }
 
+function decodeLevelsPayload(j) {
+  if (!j || j.error || typeof j.data !== 'string' || !Array.isArray(j.prices)) return null;
+  const rows = j.rows | 0;
+  const cols = j.cols | 0;
+  if (rows < 1 || cols < 1) return null;
+  let bin;
+  try {
+    bin = atob(j.data);
+  } catch {
+    return null;
+  }
+  const cells = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) cells[i] = bin.charCodeAt(i);
+  if (cells.length !== rows * cols) return null;
+  return {
+    begin: Number(j.begin),
+    end: Number(j.end),
+    prices: j.prices.map(Number),
+    rows,
+    cols,
+    cells,
+  };
+}
+
+async function refreshLevelsIfNeeded() {
+  if (!ind.heatmap) return;
+  const h = Math.min(12, chartFetchHours());
+  const k = `${sym}:${h}`;
+  if (levelsCache.k === k && levelsCache.payload) return;
+  try {
+    const r = await fetch(`/api/levels?symbol=${encodeURIComponent(sym)}&hours=${h}`);
+    let j = null;
+    try {
+      j = await r.json();
+    } catch {
+      j = null;
+    }
+    if (!r.ok || !j || j.error) {
+      levelsCache.k = k;
+      levelsCache.payload = null;
+      scheduleRedraw();
+      return;
+    }
+    const payload = decodeLevelsPayload(j);
+    levelsCache.k = k;
+    levelsCache.payload = payload;
+    scheduleRedraw();
+  } catch {
+    levelsCache.k = '';
+    levelsCache.payload = null;
+  }
+}
+
 document.querySelectorAll('input[data-ind]').forEach((inp) => {
   inp.addEventListener('change', () => {
     const kk = inp.dataset.ind;
@@ -266,6 +328,13 @@ document.querySelectorAll('input[data-ind]').forEach((inp) => {
         mirrorlyTipPinned = false;
         mirrorlyTipPinnedKey = '';
         hideMirrorlyTip();
+      }
+    }
+    if (kk === 'heatmap') {
+      if (ind.heatmap) void refreshLevelsIfNeeded();
+      else {
+        levelsCache.k = '';
+        levelsCache.payload = null;
       }
     }
     if (kk === 'split' && ind.split) {
@@ -1627,6 +1696,25 @@ function draw() {
   ctx.rect(pL, pT, xRight - pL, ohlcH);
   ctx.clip();
 
+  if (ind.heatmap && levelsCache.payload) {
+    drawOrderbookHeatmap(
+      ctx,
+      levelsCache.payload.cells,
+      levelsCache.payload.rows,
+      levelsCache.payload.cols,
+      levelsCache.payload.prices,
+      levelsCache.payload.begin,
+      levelsCache.payload.end,
+      shown,
+      pL,
+      xRight,
+      pT,
+      ohlcH,
+      toY,
+      chartTheme.heatmapRgb,
+    );
+  }
+
   if (ind.volume && ohlcH > 24) {
     let mx = 0;
     for (const c of shown) mx = Math.max(mx, c.v || 0);
@@ -2321,6 +2409,7 @@ async function loadChart() {
   if (bars1m.length > 0 && lastP != null) patchSidebarLivePrice(sym, lastP);
   updSB();
   scheduleRedraw();
+  if (ind.heatmap) void refreshLevelsIfNeeded();
 }
 
 async function loadMore() {
@@ -2364,6 +2453,8 @@ async function switchSym(s) {
   vis = 1000;
   targetVis = 1000;
   loadedHours = 17;
+  levelsCache.k = '';
+  levelsCache.payload = null;
   invalidateOICaches();
   sym = s;
   mirrorlyTipPinned = false;
