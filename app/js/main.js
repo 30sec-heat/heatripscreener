@@ -33,17 +33,18 @@ let liveRedrawT = 0;
 function scheduleLiveRedraw() {
   const now = performance.now();
   const gap = 55;
-  if (now - liveRedrawT >= gap) {
-    liveRedrawT = now;
+  const flush = () => {
+    liveRedrawTimer = null;
+    liveRedrawT = performance.now();
+    if (sym && lastP != null && Number.isFinite(lastP)) patchSidebarLivePrice(sym, lastP);
     scheduleRedraw();
+  };
+  if (now - liveRedrawT >= gap) {
+    flush();
     return;
   }
   if (liveRedrawTimer) return;
-  liveRedrawTimer = setTimeout(() => {
-    liveRedrawTimer = null;
-    liveRedrawT = performance.now();
-    scheduleRedraw();
-  }, gap - (now - liveRedrawT));
+  liveRedrawTimer = setTimeout(flush, gap - (now - liveRedrawT));
 }
 
 function resize() {
@@ -253,6 +254,8 @@ document.querySelectorAll('input[data-ind]').forEach((inp) => {
       if (ind.mirrorly) void refreshMirrorly();
       else {
         mirrorlyRows = [];
+        mirrorlyTipPinned = false;
+        mirrorlyTipPinnedKey = '';
         hideMirrorlyTip();
       }
     }
@@ -286,6 +289,9 @@ let sym = 'BTCUSDT';
 let mirrorlyRows = [];
 /** Hit targets for hover: filled in draw() when Mirrorly is on. Canvas coords. */
 let mirrorlyHits = [];
+/** Tip stays open after bubble click until the same bubble is clicked again. */
+let mirrorlyTipPinned = false;
+let mirrorlyTipPinnedKey = '';
 let tf = 60;
 let vis = 1000;
 let scrollOff = 0;
@@ -584,6 +590,11 @@ function pickMirrorlyHit(mx, my) {
   return best;
 }
 
+function mirrorlyHitKey(h) {
+  if (!h?.row) return '';
+  return `${h.row.positionId || ''}:${h.kind}`;
+}
+
 function mirrorlyTipEl() {
   return document.getElementById('mirrorly-tip');
 }
@@ -790,6 +801,8 @@ function connectWS() {
       });
       if (bars1m.length > MAX_BARS) bars1m.shift();
       curBar = null;
+      lastP = m.bar.close;
+      patchSidebarLivePrice(sym, lastP);
       invalidateOICaches();
       if (autoScr) updSB();
       scheduleRedraw();
@@ -942,6 +955,30 @@ cv.addEventListener('mousedown', (e) => {
     return;
   }
 
+  if (ind.mirrorly && lastLayout?.pL != null) {
+    const otop = lastLayout.ohlcTop ?? pT;
+    const overOhlc =
+      mx >= lastLayout.pL &&
+      mx <= lastLayout.xRight &&
+      my >= otop + 2 &&
+      my <= lastLayout.ohlcBottom - 2;
+    const mh = overOhlc ? pickMirrorlyHit(mx, my) : null;
+    if (mh) {
+      const k = mirrorlyHitKey(mh);
+      if (mirrorlyTipPinned && mirrorlyTipPinnedKey === k) {
+        mirrorlyTipPinned = false;
+        mirrorlyTipPinnedKey = '';
+        hideMirrorlyTip();
+      } else {
+        mirrorlyTipPinned = true;
+        mirrorlyTipPinnedKey = k;
+        showMirrorlyTip(mh.row, mh.kind, e.clientX, e.clientY);
+      }
+      e.preventDefault();
+      return;
+    }
+  }
+
   const totalH = H - pT - pB;
   const gap = 4;
   const n = lastLayout?.subsLen ?? 0;
@@ -1081,11 +1118,17 @@ window.addEventListener('mousemove', (e) => {
       my2 <= lastLayout.ohlcBottom - 2;
     const overTip = e.target?.closest?.('#mirrorly-tip');
     const mh = overOhlc && !isDrag && !resizeDrag && !plotShiftDrag ? pickMirrorlyHit(mouseX, mouseY) : null;
-    if (overTip) {
-      /* keep tooltip for link hover */
-    } else if (mh) showMirrorlyTip(mh.row, mh.kind, e.clientX, e.clientY);
-    else hideMirrorlyTip();
-  } else if (!e.target?.closest?.('#mirrorly-tip')) hideMirrorlyTip();
+    if (!mirrorlyTipPinned) {
+      if (overTip) {
+        /* keep tooltip for link hover */
+      } else if (mh) showMirrorlyTip(mh.row, mh.kind, e.clientX, e.clientY);
+      else hideMirrorlyTip();
+    }
+  } else {
+    mirrorlyTipPinned = false;
+    mirrorlyTipPinnedKey = '';
+    if (!e.target?.closest?.('#mirrorly-tip')) hideMirrorlyTip();
+  }
   const xhChanged = prevShowXH !== showXH;
   prevShowXH = showXH;
   const rx = Math.round(mouseX);
@@ -1137,7 +1180,7 @@ cv.addEventListener('dblclick', () => {
 cv.addEventListener('mouseleave', () => {
   showXH = false;
   prevShowXH = false;
-  hideMirrorlyTip();
+  if (!mirrorlyTipPinned) hideMirrorlyTip();
   if (annotDrawing) {
     annotDrawing = null;
     scheduleRedraw();
@@ -2094,6 +2137,7 @@ async function refreshChartSilent() {
     oiRaw = data.oiByEx || {};
     if (bars1m.length > 0) lastP = bars1m[bars1m.length - 1].c;
     invalidateOICaches();
+    if (lastP != null) patchSidebarLivePrice(sym, lastP);
     updSB();
     scheduleRedraw();
   } catch (e) {
@@ -2120,6 +2164,7 @@ async function loadChart() {
   } finally {
     chartHistoryLoaded = true;
   }
+  if (bars1m.length > 0 && lastP != null) patchSidebarLivePrice(sym, lastP);
   updSB();
   scheduleRedraw();
 }
@@ -2143,6 +2188,7 @@ async function loadMore() {
       syncVisLabel();
     }
     invalidateOICaches();
+    if (lastP != null) patchSidebarLivePrice(sym, lastP);
   } catch (e) {
     console.error(e);
   }
@@ -2166,6 +2212,9 @@ async function switchSym(s) {
   loadedHours = 17;
   invalidateOICaches();
   sym = s;
+  mirrorlyTipPinned = false;
+  mirrorlyTipPinnedKey = '';
+  hideMirrorlyTip();
   $pl.textContent = s.replace('USDT', '/USDT');
   document.title = DOC_TITLE_PAIR($pl.textContent);
   hlT(s);
@@ -2316,7 +2365,21 @@ function renT() {
     h += `<div class="ti-row ${a}" data-sym="${t.symbol}" title="${t.symbol}"><span class="ti-sym">${t.symbol.replace('USDT', '')}</span><span class="ti-price">${fP(parseFloat(t.lastPrice))}</span><span class="ti-ch" style="color:${col}">${s}${ch.toFixed(2)}%</span></div>`;
   }
   $tl.innerHTML = h;
+  // List rebuild uses Binance snapshot; chart lastP from Velo WS is fresher for the open symbol.
+  if (sym && lastP != null && Number.isFinite(Number(lastP))) patchSidebarLivePrice(sym, lastP);
 }
+
+/** Keep sidebar row in sync with live trades / forming bar for the active chart symbol. */
+function patchSidebarLivePrice(symbol, price) {
+  if (!symbol || price == null || !Number.isFinite(Number(price))) return;
+  const n = Number(price);
+  const t = tickers.find((x) => x.symbol === symbol);
+  if (t) t.lastPrice = String(n);
+  const row = $tl?.querySelector(`.ti-row[data-sym="${symbol}"]`);
+  const prEl = row?.querySelector('.ti-price');
+  if (prEl) prEl.textContent = fP(n);
+}
+
 function hlT(s) {
   document.querySelectorAll('.ti-row').forEach((el) => el.classList.toggle('active', el.dataset.sym === s));
 }
@@ -2418,18 +2481,20 @@ $chartCopy?.addEventListener('click', async () => {
   await Promise.all([loadExchangeLogoManifest(), fetchT(), loadChart()]);
   updSB();
   scheduleRedraw();
-  setInterval(fetchT, 60_000);
+  setInterval(fetchT, 12_000);
   setInterval(refreshChartSilent, 180_000);
   setInterval(() => {
     if (ind.mirrorly) void refreshMirrorly();
   }, 45_000);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
+    void fetchT();
     refreshChartSilent();
     ensureLiveWs();
   });
   window.addEventListener('pageshow', (e) => {
     if (e.persisted) {
+      void fetchT();
       refreshChartSilent();
       ensureLiveWs();
     }

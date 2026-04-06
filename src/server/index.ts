@@ -143,7 +143,7 @@ async function refreshTickers() {
     }
   }
 
-  setTimeout(refreshTickers, 60_000);
+  setTimeout(refreshTickers, 12_000);
 }
 
 const server = http.createServer(async (req, res) => {
@@ -182,7 +182,7 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, {
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*',
-      'Cache-Control': 'public, max-age=15',
+      'Cache-Control': 'public, max-age=8',
     });
     res.end(JSON.stringify(tickerCache));
     return;
