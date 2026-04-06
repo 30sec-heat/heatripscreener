@@ -263,6 +263,8 @@ document.querySelectorAll('input[data-ind]').forEach((inp) => {
       else {
         newsItems = [];
         newsHits.length = 0;
+        newsTipPinned = false;
+        newsTipPinnedKey = '';
         hideNewsTip();
       }
     }
@@ -370,6 +372,8 @@ let mirrorlyHits = [];
 /** Tip stays open after bubble click until the same bubble is clicked again. */
 let mirrorlyTipPinned = false;
 let mirrorlyTipPinnedKey = '';
+let newsTipPinned = false;
+let newsTipPinnedKey = '';
 let tf = 60;
 let vis = 1000;
 let scrollOff = 0;
@@ -489,6 +493,11 @@ function mirrorlyBarForTime(shown, tMs) {
   }
   if (tMs >= last.t) return last;
   return null;
+}
+
+function newsHitKey(h) {
+  if (!h) return '';
+  return `${h.t}:${(h.title || '').slice(0, 120)}`;
 }
 
 function pickNewsHit(mx, my) {
@@ -1211,7 +1220,37 @@ cv.addEventListener('mousedown', (e) => {
       } else {
         mirrorlyTipPinned = true;
         mirrorlyTipPinnedKey = k;
+        newsTipPinned = false;
+        newsTipPinnedKey = '';
+        hideNewsTip();
         showMirrorlyTip(mh.row, mh.kind, e.clientX, e.clientY);
+      }
+      e.preventDefault();
+      return;
+    }
+  }
+
+  if (ind.headlines && lastLayout?.pL != null) {
+    const otop = lastLayout.ohlcTop ?? pT;
+    const overOhlcNews =
+      mx >= lastLayout.pL &&
+      mx <= lastLayout.xRight &&
+      my >= otop + 2 &&
+      my <= lastLayout.ohlcBottom - 2;
+    const nhDown = overOhlcNews ? pickNewsHit(mx, my) : null;
+    if (nhDown) {
+      const nk = newsHitKey(nhDown);
+      if (newsTipPinned && newsTipPinnedKey === nk) {
+        newsTipPinned = false;
+        newsTipPinnedKey = '';
+        hideNewsTip();
+      } else {
+        newsTipPinned = true;
+        newsTipPinnedKey = nk;
+        mirrorlyTipPinned = false;
+        mirrorlyTipPinnedKey = '';
+        hideMirrorlyTip();
+        showNewsTip(nhDown.title, nhDown.url, nhDown.macro, e.clientX, e.clientY);
       }
       e.preventDefault();
       return;
@@ -1414,14 +1453,14 @@ window.addEventListener('mousemove', (e) => {
       } else if (overNewsTip) {
         hideMirrorlyTip();
       } else if (mh) {
-        hideNewsTip();
+        if (!newsTipPinned) hideNewsTip();
         showMirrorlyTip(mh.row, mh.kind, e.clientX, e.clientY);
       } else if (nh) {
         hideMirrorlyTip();
-        showNewsTip(nh.title, nh.url, nh.macro, e.clientX, e.clientY);
+        if (!newsTipPinned) showNewsTip(nh.title, nh.url, nh.macro, e.clientX, e.clientY);
       } else {
         hideMirrorlyTip();
-        hideNewsTip();
+        if (!newsTipPinned) hideNewsTip();
       }
     }
   } else {
@@ -1441,10 +1480,11 @@ window.addEventListener('mousemove', (e) => {
         const nh = pickNewsHit(mouseX, my3);
         if (overNewsTip) {
           /* keep */
-        } else if (nh) showNewsTip(nh.title, nh.url, nh.macro, e.clientX, e.clientY);
-        else hideNewsTip();
-      } else if (!overNewsTip) hideNewsTip();
-    } else if (!e.target?.closest?.('#news-tip')) hideNewsTip();
+        } else if (nh) {
+          if (!newsTipPinned) showNewsTip(nh.title, nh.url, nh.macro, e.clientX, e.clientY);
+        } else if (!newsTipPinned) hideNewsTip();
+      } else if (!overNewsTip && !newsTipPinned) hideNewsTip();
+    } else if (!e.target?.closest?.('#news-tip') && !newsTipPinned) hideNewsTip();
   }
   const xhChanged = prevShowXH !== showXH;
   prevShowXH = showXH;
@@ -1494,6 +1534,9 @@ cv.addEventListener('dblclick', () => {
   targetVis = 1000;
   plotShiftX = 0;
   priceYZoom = 1;
+  newsTipPinned = false;
+  newsTipPinnedKey = '';
+  hideNewsTip();
   syncVisLabel();
   updSB();
   invalidateOISlice();
@@ -1504,7 +1547,7 @@ cv.addEventListener('mouseleave', () => {
   showXH = false;
   prevShowXH = false;
   if (!mirrorlyTipPinned) hideMirrorlyTip();
-  hideNewsTip();
+  if (!newsTipPinned) hideNewsTip();
   if (annotDrawing) {
     annotDrawing = null;
     scheduleRedraw();
@@ -2073,7 +2116,7 @@ function draw() {
       ctx.closePath();
       ctx.fill();
       const url = typeof it.url === 'string' ? it.url : '';
-      newsHits.push({ x, title, url: url || undefined, macro: !!it.macro });
+      newsHits.push({ t: tMs, x, title, url: url || undefined, macro: !!it.macro });
     }
     ctx.setLineDash([]);
   }
@@ -2086,7 +2129,7 @@ function draw() {
     const bubGap = 5;
     const yClampM = (y) => Math.max(pT + MR + 5, Math.min(pT + ohlcH - MR - 5, y));
     ctx.save();
-    ctx.globalAlpha = 0.4;
+    ctx.globalAlpha = 0.62;
     for (const row of mirrorlyRows) {
       const sideTint = row.side === 'short' ? chartTheme.mirrorlyShort : chartTheme.mirrorlyLong;
       const openMs = Date.parse(row.opened);
@@ -2599,6 +2642,9 @@ async function switchSym(s) {
   mirrorlyTipPinned = false;
   mirrorlyTipPinnedKey = '';
   hideMirrorlyTip();
+  newsTipPinned = false;
+  newsTipPinnedKey = '';
+  hideNewsTip();
   tapeWallsLoadedKey = '';
   tapeWallsSegments = [];
   tapeWallsFetchGen++;

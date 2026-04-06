@@ -7,15 +7,16 @@ import { fetchVelo, type VeloBar } from '../shared/velo.js';
 export type NewsItem = { t: number; title: string; url?: string; macro?: boolean };
 
 const BTC_SYM = 'BTCUSDT';
-const REACT_WINDOW_MIN = Math.max(1, Math.min(45, Number(process.env.NEWS_REACT_WINDOW_MIN) || 7));
+const REACT_WINDOW_MIN = Math.max(1, Math.min(45, Number(process.env.NEWS_REACT_WINDOW_MIN) || 8));
+/** Min (max H − min L) / ref over bars *after* headline — filters micro-noise (default ~0.16%). */
 const REACT_MIN_RANGE = Math.max(
-  0.00035,
-  Math.min(0.02, Number(process.env.NEWS_REACT_MIN_RANGE) || 0.00075),
+  0.0005,
+  Math.min(0.02, Number(process.env.NEWS_REACT_MIN_RANGE) || 0.0016),
 );
-/** Min |close(last bar in window) − headline close| / ref. OR’d with range so either vol or drift qualifies. */
+/** Min |close(last bar in window) − headline close| / ref (default ~0.09%). */
 const REACT_MIN_NET = Math.max(
   0,
-  Math.min(0.02, Number(process.env.NEWS_REACT_MIN_NET) || 0.0004),
+  Math.min(0.02, Number(process.env.NEWS_REACT_MIN_NET) || 0.0009),
 );
 const BTC_HISTORY_H = Math.max(24, Math.min(120, Number(process.env.NEWS_BTC_HISTORY_H) || 96));
 const TG_POLL_MS = Math.max(30_000, Number(process.env.TELEGRAM_NEWS_POLL_MS) || 90_000);
@@ -129,8 +130,8 @@ function barIndexContaining(bars: VeloBar[], tMs: number): number {
 
 /**
  * Keep a headline only if BTC moved **after** the headline minute (bars `i+1 … i+W` only).
- * Pass if **either** post-window range ≥ REACT_MIN_RANGE **or** net close move ≥ REACT_MIN_NET.
- * Set NEWS_REACT_COMBINE=and to require both.
+ * Default: **both** post-window range ≥ REACT_MIN_RANGE **and** net close move ≥ REACT_MIN_NET.
+ * Set NEWS_REACT_COMBINE=or to allow either (looser).
  */
 function filterNewsByPostHeadlineMove(items: NewsItem[], bars: VeloBar[]): NewsItem[] {
   if (!bars.length) return [];
@@ -158,10 +159,10 @@ function filterNewsByPostHeadlineMove(items: NewsItem[], bars: VeloBar[]): NewsI
     const netFrac = Math.abs(endClose - ref) / ref;
     const rangeOk = rangeFrac >= REACT_MIN_RANGE;
     const netOk = REACT_MIN_NET <= 0 ? false : netFrac >= REACT_MIN_NET;
-    const strictAnd = process.env.NEWS_REACT_COMBINE === 'and';
-    const pass = strictAnd
-      ? rangeOk && (REACT_MIN_NET <= 0 || netOk)
-      : rangeOk || netOk;
+    const looseOr = process.env.NEWS_REACT_COMBINE === 'or';
+    const pass = looseOr
+      ? rangeOk || netOk
+      : rangeOk && (REACT_MIN_NET <= 0 || netOk);
     if (pass) out.push(it);
   }
   return out;
