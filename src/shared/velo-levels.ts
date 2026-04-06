@@ -67,6 +67,7 @@ export async function fetchVeloLevelsBuffer(
   symbol: string,
   begin: number,
   end: number,
+  spread = 1,
 ): Promise<Buffer> {
   const u = new URL(VELO_LEVELS);
   u.searchParams.set('bin', '1');
@@ -75,7 +76,7 @@ export async function fetchVeloLevelsBuffer(
   u.searchParams.set('begin', String(Math.floor(begin)));
   u.searchParams.set('end', String(Math.floor(end)));
   u.searchParams.set('reso', '1');
-  u.searchParams.set('spread', '10');
+  u.searchParams.set('spread', String(Math.max(1, Math.min(50, spread | 0)) || 1));
   const res = await fetch(u.toString(), { headers: HEADERS, signal: fetchSignal() });
   if (!res.ok) throw new Error(`velo levels http ${res.status}`);
   let raw = Buffer.from(await res.arrayBuffer());

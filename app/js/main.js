@@ -183,8 +183,10 @@ let panelFracs = [];
 let lastLayout = null;
 let resizeDrag = null;
 const oscCache = { k: '', arr: [], p95: [], rsi: [], oscCrossSig: [] };
-/** Velo `/api/levels` grid for OB heatmap; `k` = `${sym}:${hours}`. */
+/** Velo `/api/levels` grid for OB heatmap; `k` includes sym + begin + end + spread. */
 const levelsCache = { k: '', payload: /** @type {null | { begin: number; end: number; prices: number[]; rows: number; cols: number; cells: Uint8Array }} */ (null) };
+let heatmapFetchTimer = /** @type {ReturnType<typeof setTimeout> | null} */ (null);
+let heatmapSchedSig = '';
 const exOn = new Set(['binance-futures', 'bybit', 'okex-swap', 'deribit', 'hyperliquid']);
 const KNOWN_EX = ['binance-futures', 'bybit', 'okex-swap', 'deribit', 'hyperliquid'];
 
@@ -280,13 +282,36 @@ function decodeLevelsPayload(j) {
   };
 }
 
-async function refreshLevelsIfNeeded() {
+function heatmapVisibleRangeMs() {
+  const ext1m = ext1mSeries();
+  const all = displayAllFromExt(ext1m);
+  if (!all.length) return null;
+  const v = Math.min(all.length, vis);
+  let end = all.length - scrollOff;
+  if (end < 1) end = all.length;
+  const st = Math.max(0, end - v);
+  const shown = all.slice(st, end);
+  if (!shown.length) return null;
+  return { t0: shown[0].t, t1: shown[shown.length - 1].t };
+}
+
+async function fetchLevelsForVisibleRange(t0, t1) {
   if (!ind.heatmap) return;
-  const h = Math.min(12, chartFetchHours());
-  const k = `${sym}:${h}`;
+  const pad = 120000;
+  let begin = Math.floor(t0 - pad);
+  let end = Math.floor(t1 + pad);
+  const maxSpan = 12 * 3600000;
+  if (end - begin > maxSpan) begin = end - maxSpan;
+  const minSpan = 90_000;
+  if (end - begin < minSpan) begin = end - minSpan;
+  if (end <= begin) return;
+  const spread = 1;
+  const k = `${sym}:${begin}:${end}:${spread}`;
   if (levelsCache.k === k && levelsCache.payload) return;
   try {
-    const r = await fetch(`/api/levels?symbol=${encodeURIComponent(sym)}&hours=${h}`);
+    const r = await fetch(
+      `/api/levels?symbol=${encodeURIComponent(sym)}&begin=${begin}&end=${end}&spread=${spread}`,
+    );
     let j = null;
     try {
       j = await r.json();
@@ -307,6 +332,22 @@ async function refreshLevelsIfNeeded() {
     levelsCache.k = '';
     levelsCache.payload = null;
   }
+}
+
+function scheduleHeatmapRangeFetch(t0, t1) {
+  if (!ind.heatmap) return;
+  const sig = `${sym}:${t0}:${t1}`;
+  if (sig === heatmapSchedSig && (levelsCache.payload || heatmapFetchTimer)) return;
+  if (sig !== heatmapSchedSig) {
+    levelsCache.k = '';
+    levelsCache.payload = null;
+  }
+  heatmapSchedSig = sig;
+  if (heatmapFetchTimer) clearTimeout(heatmapFetchTimer);
+  heatmapFetchTimer = setTimeout(() => {
+    heatmapFetchTimer = null;
+    void fetchLevelsForVisibleRange(t0, t1);
+  }, 200);
 }
 
 document.querySelectorAll('input[data-ind]').forEach((inp) => {
@@ -331,10 +372,23 @@ document.querySelectorAll('input[data-ind]').forEach((inp) => {
       }
     }
     if (kk === 'heatmap') {
-      if (ind.heatmap) void refreshLevelsIfNeeded();
-      else {
+      if (ind.heatmap) {
         levelsCache.k = '';
         levelsCache.payload = null;
+        heatmapSchedSig = '';
+        const rng = heatmapVisibleRangeMs();
+        if (rng) {
+          heatmapSchedSig = `${sym}:${rng.t0}:${rng.t1}`;
+          void fetchLevelsForVisibleRange(rng.t0, rng.t1);
+        }
+      } else {
+        levelsCache.k = '';
+        levelsCache.payload = null;
+        heatmapSchedSig = '';
+        if (heatmapFetchTimer) {
+          clearTimeout(heatmapFetchTimer);
+          heatmapFetchTimer = null;
+        }
       }
     }
     if (kk === 'split' && ind.split) {
@@ -1631,6 +1685,8 @@ function draw() {
     return;
   }
 
+  if (ind.heatmap) scheduleHeatmapRangeFetch(shown[0].t, shown[shown.length - 1].t);
+
   let oiPanelHud = null;
 
   if (ind.osc || ind.rev || ind.vrng) ensureOscDerived(all);
@@ -1710,6 +1766,8 @@ function draw() {
       xRight,
       pT,
       ohlcH,
+      cw,
+      plotShiftX,
       toY,
       lo,
       hi,
@@ -2411,7 +2469,6 @@ async function loadChart() {
   if (bars1m.length > 0 && lastP != null) patchSidebarLivePrice(sym, lastP);
   updSB();
   scheduleRedraw();
-  if (ind.heatmap) void refreshLevelsIfNeeded();
 }
 
 async function loadMore() {
@@ -2457,6 +2514,7 @@ async function switchSym(s) {
   loadedHours = 17;
   levelsCache.k = '';
   levelsCache.payload = null;
+  heatmapSchedSig = '';
   invalidateOICaches();
   sym = s;
   mirrorlyTipPinned = false;

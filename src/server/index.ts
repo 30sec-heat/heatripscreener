@@ -157,15 +157,27 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === '/api/levels') {
     const rawSym = (url.searchParams.get('symbol') ?? 'BTCUSDT').toUpperCase();
     const symbol = /^[A-Z0-9]{2,24}USDT$/.test(rawSym) ? rawSym : 'BTCUSDT';
-    const hours = Math.min(
-      12,
-      Math.max(1, parseFloat(url.searchParams.get('hours') ?? '8') || 8),
-    );
+    const spread = Math.max(1, Math.min(50, parseInt(url.searchParams.get('spread') ?? '1', 10) || 1));
     const now = Date.now();
-    const begin = Math.floor(now - hours * 3600000);
+    const maxSpan = 12 * 3600000;
+    const qBegin = parseInt(url.searchParams.get('begin') ?? '', 10);
+    const qEnd = parseInt(url.searchParams.get('end') ?? '', 10);
+    let begin: number;
+    let end: number;
+    if (Number.isFinite(qBegin) && Number.isFinite(qEnd) && qEnd > qBegin) {
+      begin = Math.floor(qBegin);
+      end = Math.floor(Math.min(qEnd, now + 60000));
+      if (end - begin > maxSpan) begin = end - maxSpan;
+    } else {
+      const hours = Math.min(12, Math.max(1, parseFloat(url.searchParams.get('hours') ?? '4') || 4));
+      end = now;
+      begin = Math.floor(now - hours * 3600000);
+    }
+    const minSpan = 90_000;
+    if (end - begin < minSpan) begin = end - minSpan;
 
     try {
-      const raw = await fetchVeloLevelsBuffer(symbol, begin, now);
+      const raw = await fetchVeloLevelsBuffer(symbol, begin, end, spread);
       const parsed = parseVeloLevelsBinary(raw);
       const grid = Buffer.from(parsed.grid);
       res.writeHead(200, {

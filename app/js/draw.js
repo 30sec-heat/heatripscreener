@@ -196,9 +196,29 @@ export function linePanelScale(vals, dT, pH) {
 
 /** Spread right-end labels vertically so short tickers (Bin, Byb, …) do not overlap. */
 
+function xAtHeatTime(t, shown, pL, cw, plotShiftX) {
+  const n = shown.length;
+  if (n < 1) return pL;
+  if (n === 1) return pL + cw / 2 + plotShiftX;
+  if (t <= shown[0].t) return pL + cw / 2 + plotShiftX;
+  if (t >= shown[n - 1].t) return pL + (n - 1) * cw + cw / 2 + plotShiftX;
+  let lo = 0;
+  let hi = n - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (shown[mid].t <= t) lo = mid;
+    else hi = mid;
+  }
+  const t0 = shown[lo].t;
+  const t1 = shown[hi].t;
+  const f = (t - t0) / (t1 - t0 || 1);
+  return pL + (lo + f) * cw + cw / 2 + plotShiftX;
+}
+
 /**
  * Velo `/l/levels` price ladder often does not match live USD (offset bucket); shift so its
  * mid tracks the visible OHLC mid, then map with the same `toY` as candles.
+ * Horizontal position matches OHLC bar index spacing + `plotShiftX` (not raw time → full width).
  */
 export function drawOrderbookHeatmap(
   ctx,
@@ -213,6 +233,8 @@ export function drawOrderbookHeatmap(
   xRight,
   pT,
   ohlcH,
+  cw,
+  plotShiftX,
   toY,
   ohlcLo,
   ohlcHi,
@@ -224,9 +246,19 @@ export function drawOrderbookHeatmap(
 
   const tVis0 = shown[0].t;
   const tVis1 = shown[shown.length - 1].t;
-  const tSpan = tVis1 - tVis0 || 1;
-  const xOfT = (t) => pL + ((t - tVis0) / tSpan) * (xRight - pL);
   const rowMs = (endMs - beginMs) / rows;
+
+  let overlapF = 0;
+  let overlapR = 0;
+  for (let r = 0; r < rows; r++) {
+    const tAf = beginMs + r * rowMs;
+    const tBf = beginMs + (r + 1) * rowMs;
+    const tAr = endMs - (r + 1) * rowMs;
+    const tBr = endMs - r * rowMs;
+    if (!(tBf < tVis0 || tAf > tVis1)) overlapF++;
+    if (!(tBr < tVis0 || tAr > tVis1)) overlapR++;
+  }
+  const timeForward = overlapF >= overlapR;
 
   const ladderMid = (prices[0] + prices[cols - 1]) / 2;
   const chartMid = (ohlcLo + ohlcHi) / 2;
@@ -255,17 +287,21 @@ export function drawOrderbookHeatmap(
         ? prices[j] - prices[j - 1]
         : 1;
 
+  const rowTimes = (r) =>
+    timeForward
+      ? [beginMs + r * rowMs, beginMs + (r + 1) * rowMs]
+      : [endMs - (r + 1) * rowMs, endMs - r * rowMs];
+
   ctx.save();
   for (let r = 0; r < rows; r++) {
-    const tA = beginMs + r * rowMs;
-    const tB = beginMs + (r + 1) * rowMs;
+    const [tA, tB] = rowTimes(r);
     if (tB < tVis0 || tA > tVis1) continue;
-    let xL = xOfT(tA);
-    let xR = xOfT(tB);
+    let xL = xAtHeatTime(tA, shown, pL, cw, plotShiftX);
+    let xR = xAtHeatTime(tB, shown, pL, cw, plotShiftX);
     if (xR < xL) [xL, xR] = [xR, xL];
     const xa = Math.max(pL, xL);
     const xb = Math.min(xRight, xR);
-    if (xb - xa < 0.25) continue;
+    if (xb - xa < 0.15) continue;
 
     for (let j = j0; j <= j1; j++) {
       const v = cells[r * cols + j];
@@ -277,7 +313,7 @@ export function drawOrderbookHeatmap(
       const yt = Math.min(yA, yB);
       const yb = Math.max(yA, yB);
       if (yb < pT || yt > pT + ohlcH) continue;
-      const alpha = (v / 255) * 0.58;
+      const alpha = (v / 255) * 0.62;
       ctx.fillStyle = `rgba(${heatmapRgb},${alpha})`;
       ctx.fillRect(xa, yt, Math.max(xb - xa, 0.35), Math.max(yb - yt, 0.5));
     }
