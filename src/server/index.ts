@@ -153,6 +153,16 @@ async function refreshTickers() {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://localhost:${SERVER_PORT}`);
 
+  /** Railway/orchestrator probes — no disk, finishes before static routes (unblocks queued deploys). */
+  if (url.pathname === '/health' || url.pathname === '/healthz') {
+    res.writeHead(200, {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Cache-Control': 'no-store',
+    });
+    res.end('ok');
+    return;
+  }
+
   // Returns { bars: [...], oiByEx: { "binance-futures": [{t,o,h,l,c},...], ... } }
   // Frontend computes net L/S, aggregated OI, and split views locally
   if (url.pathname === '/api/chart') {
