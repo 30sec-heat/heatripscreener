@@ -163,6 +163,7 @@ const ind = {
   vrng: false,
   volume: false,
   split: false,
+  headlines: false,
   mirrorly: false,
 };
 const PANEL_GAP = 4;
@@ -250,6 +251,14 @@ document.querySelectorAll('input[data-ind]').forEach((inp) => {
   inp.addEventListener('change', () => {
     const kk = inp.dataset.ind;
     ind[kk] = inp.checked;
+    if (kk === 'headlines') {
+      if (ind.headlines) void fetchNews();
+      else {
+        newsItems = [];
+        newsHits.length = 0;
+        hideNewsTip();
+      }
+    }
     if (kk === 'mirrorly') {
       if (ind.mirrorly) void refreshMirrorly();
       else {
@@ -285,6 +294,10 @@ document.querySelectorAll('[data-ex]').forEach((b) => {
 let chartHistoryLoaded = false;
 
 let sym = 'BTCUSDT';
+/** RSS headlines from GET /api/news. */
+let newsItems = [];
+/** Headline hover targets set in draw() when Headlines is on. */
+let newsHits = [];
 /** Mirrorly overlay rows from GET /api/mirrorly (server-side aggregated). */
 let mirrorlyRows = [];
 /** Hit targets for hover: filled in draw() when Mirrorly is on. Canvas coords. */
@@ -411,6 +424,81 @@ function mirrorlyBarForTime(shown, tMs) {
   }
   if (tMs >= last.t) return last;
   return null;
+}
+
+function pickNewsHit(mx, my) {
+  if (!ind.headlines || !lastLayout) return null;
+  const otop = lastLayout.ohlcTop + 2;
+  const obot = lastLayout.ohlcBottom - 2;
+  if (my < otop || my > obot || mx < lastLayout.pL || mx > lastLayout.xRight) return null;
+  let best = null;
+  let bestD = 10;
+  for (const h of newsHits) {
+    const d = Math.abs(mx - h.x);
+    if (d < bestD) {
+      bestD = d;
+      best = h;
+    }
+  }
+  return best;
+}
+
+function newsTipEl() {
+  return document.getElementById('news-tip');
+}
+
+function showNewsTip(title, url, clientX, clientY) {
+  const tip = newsTipEl();
+  if (!tip) return;
+  tip.hidden = false;
+  tip.replaceChildren();
+  const card = document.createElement('div');
+  card.className = 'mirrorly-tip-card';
+  const head = document.createElement('div');
+  head.className = 'mirrorly-tip-mark';
+  head.textContent = 'Headline';
+  const tEl = document.createElement('div');
+  tEl.className = 'mirrorly-tip-name';
+  tEl.style.marginTop = '6px';
+  tEl.textContent = title;
+  card.append(head, tEl);
+  if (url) {
+    const a = document.createElement('a');
+    a.className = 'mirrorly-tip-link';
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.textContent = 'Open link';
+    card.appendChild(a);
+  }
+  tip.appendChild(card);
+  const pad = 12;
+  const tw = 360;
+  let left = clientX + 16;
+  let top = clientY + 16;
+  left = Math.max(pad, Math.min(left, window.innerWidth - tw - pad));
+  top = Math.max(pad, Math.min(top, window.innerHeight - 240));
+  tip.style.left = `${left}px`;
+  tip.style.top = `${top}px`;
+  tip.style.width = `${tw}px`;
+}
+
+function hideNewsTip() {
+  const tip = newsTipEl();
+  if (tip) tip.hidden = true;
+}
+
+async function fetchNews() {
+  if (!ind.headlines) return;
+  try {
+    const r = await fetch('/api/news', { cache: 'no-store' });
+    if (!r.ok) return;
+    const j = await r.json();
+    newsItems = Array.isArray(j.items) ? j.items : [];
+    scheduleRedraw();
+  } catch (_e) {
+    /* ignore */
+  }
 }
 
 let exchangeLogoManifest = null;
@@ -1096,15 +1184,23 @@ window.addEventListener('mousemove', (e) => {
       my >= mlOhlcTop + 2 &&
       my <= lastLayout.ohlcBottom - 2 &&
       pickMirrorlyHit(mouseX, mouseY);
+    const nhNear =
+      ind.headlines &&
+      lastLayout?.pL != null &&
+      mouseX >= lastLayout.pL &&
+      mouseX <= lastLayout.xRight &&
+      my >= mlOhlcTop + 2 &&
+      my <= lastLayout.ohlcBottom - 2 &&
+      pickNewsHit(mouseX, my);
     if (lastLayout?.subsLen) {
       if (Math.abs(my - lastLayout.ohlcBottom) < 6) cv.style.cursor = 'ns-resize';
       else if (lastLayout.panelDividers.some((y) => Math.abs(my - y) < 5)) cv.style.cursor = 'ns-resize';
-      else if (mlNear) cv.style.cursor = 'pointer';
+      else if (mlNear || nhNear) cv.style.cursor = 'pointer';
       else if (annotDrawOn) cv.style.cursor = 'crosshair';
       else if (my < lastLayout.ohlcBottom - 4)
         cv.style.cursor = e.altKey || e.metaKey ? 'grab' : 'crosshair';
       else cv.style.cursor = annotDrawOn ? 'crosshair' : 'default';
-    } else if (mlNear) cv.style.cursor = 'pointer';
+    } else if (mlNear || nhNear) cv.style.cursor = 'pointer';
     else cv.style.cursor = annotDrawOn ? 'crosshair' : e.altKey || e.metaKey ? 'grab' : 'crosshair';
   }
 
@@ -1117,17 +1213,49 @@ window.addEventListener('mousemove', (e) => {
       my2 >= otop + 2 &&
       my2 <= lastLayout.ohlcBottom - 2;
     const overTip = e.target?.closest?.('#mirrorly-tip');
+    const overNewsTip = e.target?.closest?.('#news-tip');
     const mh = overOhlc && !isDrag && !resizeDrag && !plotShiftDrag ? pickMirrorlyHit(mouseX, mouseY) : null;
+    const nh =
+      ind.headlines && overOhlc && !isDrag && !resizeDrag && !plotShiftDrag && !mh
+        ? pickNewsHit(mouseX, my2)
+        : null;
     if (!mirrorlyTipPinned) {
       if (overTip) {
         /* keep tooltip for link hover */
-      } else if (mh) showMirrorlyTip(mh.row, mh.kind, e.clientX, e.clientY);
-      else hideMirrorlyTip();
+      } else if (overNewsTip) {
+        hideMirrorlyTip();
+      } else if (mh) {
+        hideNewsTip();
+        showMirrorlyTip(mh.row, mh.kind, e.clientX, e.clientY);
+      } else if (nh) {
+        hideMirrorlyTip();
+        showNewsTip(nh.title, nh.url, e.clientX, e.clientY);
+      } else {
+        hideMirrorlyTip();
+        hideNewsTip();
+      }
     }
   } else {
     mirrorlyTipPinned = false;
     mirrorlyTipPinnedKey = '';
     if (!e.target?.closest?.('#mirrorly-tip')) hideMirrorlyTip();
+    if (ind.headlines && lastLayout?.pL != null) {
+      const my3 = mouseY;
+      const otop = lastLayout.ohlcTop ?? pT;
+      const overOhlc =
+        mouseX >= lastLayout.pL &&
+        mouseX <= lastLayout.xRight &&
+        my3 >= otop + 2 &&
+        my3 <= lastLayout.ohlcBottom - 2;
+      const overNewsTip = e.target?.closest?.('#news-tip');
+      if (overOhlc && !isDrag && !resizeDrag && !plotShiftDrag) {
+        const nh = pickNewsHit(mouseX, my3);
+        if (overNewsTip) {
+          /* keep */
+        } else if (nh) showNewsTip(nh.title, nh.url, e.clientX, e.clientY);
+        else hideNewsTip();
+      } else if (!overNewsTip) hideNewsTip();
+    } else if (!e.target?.closest?.('#news-tip')) hideNewsTip();
   }
   const xhChanged = prevShowXH !== showXH;
   prevShowXH = showXH;
@@ -1181,6 +1309,7 @@ cv.addEventListener('mouseleave', () => {
   showXH = false;
   prevShowXH = false;
   if (!mirrorlyTipPinned) hideMirrorlyTip();
+  hideNewsTip();
   if (annotDrawing) {
     annotDrawing = null;
     scheduleRedraw();
@@ -1726,6 +1855,40 @@ function draw() {
         }
       }
     } catch (_e) {}
+
+  newsHits.length = 0;
+  if (ind.headlines && newsItems.length) {
+    ctx.strokeStyle = chartTheme.newsLine;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([2, 4]);
+    const yTickTop = pT + 2;
+    const yBotLn = pT + priceOhlcH - 2;
+    const barMs = tf * 1000;
+    const tHi = shown[shown.length - 1].t + barMs * 2;
+    const tLo = shown[0].t - barMs;
+    for (const it of newsItems) {
+      const tMs = Number(it.t);
+      if (!Number.isFinite(tMs) || tMs < tLo || tMs > tHi) continue;
+      const title = typeof it.title === 'string' ? it.title : '';
+      if (!title) continue;
+      const x = mirrorlyXAt(shown, tMs, toX, cw);
+      if (x == null || x < pL || x > xRight) continue;
+      ctx.beginPath();
+      ctx.moveTo(x, yTickTop);
+      ctx.lineTo(x, yBotLn);
+      ctx.stroke();
+      ctx.fillStyle = chartTheme.newsTick;
+      ctx.beginPath();
+      ctx.moveTo(x - 3, yTickTop);
+      ctx.lineTo(x + 3, yTickTop);
+      ctx.lineTo(x, yTickTop + 5);
+      ctx.closePath();
+      ctx.fill();
+      const url = typeof it.url === 'string' ? it.url : '';
+      newsHits.push({ x, title, url: url || undefined });
+    }
+    ctx.setLineDash([]);
+  }
 
   if (ind.mirrorly && mirrorlyRows.length) {
     mirrorlyHits.length = 0;
@@ -2489,9 +2652,15 @@ $chartCopy?.addEventListener('click', async () => {
   setInterval(() => {
     if (ind.mirrorly) void refreshMirrorly();
   }, 45_000);
+  setInterval(() => {
+    if (document.visibilityState !== 'visible') return;
+    if (ind.headlines) void fetchNews();
+  }, 120_000);
+  if (ind.headlines) void fetchNews();
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
     void fetchT();
+    if (ind.headlines) void fetchNews();
     refreshChartSilent();
     ensureLiveWs();
   });

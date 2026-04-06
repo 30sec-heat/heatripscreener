@@ -9,6 +9,7 @@ import { setupWebSocket } from './ws-handler.js';
 import { startOIPoller, isBanned, checkBanResponse } from '../ingestion/oi-poller.js';
 import { startVeloLivePoller } from '../ingestion/velo-live-bars.js';
 import { applyLiveTickerOverlay, startBinanceMiniTickerWs } from '../ingestion/binance-mini-ticker-ws.js';
+import { getNewsItems, startNewsRssPoller } from '../ingestion/news-rss.js';
 import {
   fetchVeloRaw,
   ALL_EXCHANGES,
@@ -189,6 +190,16 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (url.pathname === '/api/news') {
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'public, max-age=15',
+    });
+    res.end(JSON.stringify({ items: getNewsItems() }));
+    return;
+  }
+
   if (url.pathname === '/api/mirrorly') {
     const symbol = url.searchParams.get('symbol') ?? 'BTCUSDT';
     const positions = getMirrorlyForChartSymbol(symbol).map((p) => ({
@@ -225,6 +236,7 @@ const server = http.createServer(async (req, res) => {
 
 void refreshTickers();
 startBinanceMiniTickerWs();
+startNewsRssPoller();
 startMirrorlyIngestion();
 
 setupWebSocket(server);

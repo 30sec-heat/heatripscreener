@@ -56,6 +56,8 @@ const chartThemeDark = {
   mirrorlyIconFallbackBg: '#2b3139',
   mirrorlyIconFallbackFg: '#eaecef',
   mirrorlyIconFallbackRing: 'rgba(132, 142, 156, 0.48)',
+  newsLine: 'rgba(255, 200, 80, 0.55)',
+  newsTick: 'rgba(255, 200, 80, 0.85)',
 };
 
 const chartThemeLight = {
@@ -115,6 +117,8 @@ const chartThemeLight = {
   mirrorlyIconFallbackBg: '#eceff1',
   mirrorlyIconFallbackFg: '#1e2329',
   mirrorlyIconFallbackRing: 'rgba(112, 122, 138, 0.35)',
+  newsLine: 'rgba(201, 120, 0, 0.5)',
+  newsTick: 'rgba(201, 120, 0, 0.88)',
 };
 
 export let chartTheme = chartThemeDark;
