@@ -14,7 +14,8 @@ export function clearNewsForToggle() {
 
 export function newsHitKey(h) {
   if (!h) return '';
-  return `${h.t}:${(h.title || '').slice(0, 120)}`;
+  const id = h.msgId != null ? String(h.msgId) : '';
+  return `${h.t}:${id}:${(h.title || '').slice(0, 64)}`;
 }
 
 export function pickNewsHit(mx, my, headlinesOn, lastLayout) {
@@ -49,8 +50,7 @@ export function showNewsTip(title, url, macro, clientX, clientY) {
   head.className = 'mirrorly-tip-mark';
   head.textContent = macro ? 'Macro · BTC tape' : 'Headline';
   const tEl = document.createElement('div');
-  tEl.className = 'mirrorly-tip-name';
-  tEl.style.marginTop = '6px';
+  tEl.className = 'mirrorly-tip-news-body';
   tEl.textContent = title;
   card.append(head, tEl);
   if (url) {
@@ -64,14 +64,15 @@ export function showNewsTip(title, url, macro, clientX, clientY) {
   }
   tip.appendChild(card);
   const pad = 12;
-  const tw = 360;
+  const tw = Math.min(440, Math.max(300, window.innerWidth - 2 * pad));
   let left = clientX + 16;
   let top = clientY + 16;
   left = Math.max(pad, Math.min(left, window.innerWidth - tw - pad));
-  top = Math.max(pad, Math.min(top, window.innerHeight - 240));
+  top = Math.max(pad, Math.min(top, window.innerHeight - 80));
   tip.style.left = `${left}px`;
   tip.style.top = `${top}px`;
   tip.style.width = `${tw}px`;
+  tip.style.maxHeight = 'none';
 }
 
 export function hideNewsTip() {

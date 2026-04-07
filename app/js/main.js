@@ -1547,7 +1547,14 @@ function draw() {
       ctx.closePath();
       ctx.fill();
       const url = typeof it.url === 'string' ? it.url : '';
-      newsHits.push({ t: tMs, x, title, url: url || undefined, macro: !!it.macro });
+      newsHits.push({
+        t: tMs,
+        x,
+        title,
+        url: url || undefined,
+        macro: !!it.macro,
+        msgId: it.msgId,
+      });
     }
     ctx.setLineDash([]);
   }

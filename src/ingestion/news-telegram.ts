@@ -20,6 +20,14 @@ const MTPROTO_BACKOFF_MS = Math.max(60_000, Number(process.env.TELEGRAM_MTPROTO_
 /** Public “Market News Feed” — https://t.me/marketfeed (override only via env). */
 const DEFAULT_NEWS_CHANNEL = 'marketfeed';
 
+/** Optional cap on stored text length; unset or 0 = full message body. */
+function clampNewsBody(text: string): string {
+  const n = Number(process.env.NEWS_BODY_MAX_CHARS);
+  if (!Number.isFinite(n) || n <= 0) return text;
+  const cap = Math.min(262144, Math.floor(n));
+  return text.length <= cap ? text : text.slice(0, cap);
+}
+
 let cache: NewsItem[] = [];
 let client: TelegramClient | null = null;
 let warnedConfig = false;
@@ -100,7 +108,7 @@ function tgRowToNewsItem(raw: unknown): NewsItem | null {
   return {
     msgId,
     t,
-    title: text.slice(0, 500),
+    title: clampNewsBody(text),
     url,
     macro: titleLooksMacro(text),
   };
@@ -231,7 +239,7 @@ async function fetchTmePublicChannelWeb(channelUser: string): Promise<NewsItem[]
       if (!Number.isFinite(msgId) || !Number.isFinite(t)) continue;
       oldestInPage = Math.min(oldestInPage, t);
       if (t < sinceMs) continue;
-      const title = htmlToTitleText(textM[1]).slice(0, 500);
+      const title = clampNewsBody(htmlToTitleText(textM[1]));
       if (title.length < 4) continue;
       const urlOut = firstHttpUrlInHtml(textM[1]) ?? firstHttpUrlInHtml(chunk);
       byId.set(msgId, { msgId, t, title, url: urlOut, macro: titleLooksMacro(title) });
